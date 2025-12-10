@@ -1,0 +1,10 @@
+# Inherit from base
+defaults:
+  - model_base
+  - datasets
+
+# Ablation specific overrides
+experiment_name: "ablation_no_mpg"
+model_type: "gsmeta"
+use_ac_inner: true
+use_mpg_context: false # Ablating MPG

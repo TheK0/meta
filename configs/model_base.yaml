@@ -1,0 +1,39 @@
+# Model Architecture
+mol_input_dim: 100 # Depends on featurization
+hidden_dim: 128
+embedding_dim: 128
+gnn_type: "gin" # gin, gcn, gat
+num_layers: 3
+dropout: 0.5
+
+# Training
+lr: 0.001
+weight_decay: 0.0001
+epochs: 100
+batch_size: 32
+patience: 10
+
+# Meta-learning
+meta_lr: 0.001
+inner_lr: 0.01
+inner_steps: 1
+n_tasks_per_epoch: 10
+k_shot: 5
+q_query: 5
+n_test_tasks: 100
+
+# Dataset
+task_type: "classification"  # classification or regression
+ac_threshold: 0.0  # Threshold for AC label difference
+
+# AC-Aware
+use_ac_inner_loop: true
+ac_weight: 2.0
+r_start: 1.0
+r_end: 0.5
+total_steps: 10000
+scheduler_input_dim: 2 # ac_ratio, inner_loss
+
+# Paths
+checkpoint_path: "checkpoints/model_final.pt"
+results_path: "results/meta_test_results.pkl"

@@ -1,0 +1,14 @@
+# Inherit from base
+defaults:
+  - model_base
+  - datasets
+
+# Full AC specific overrides
+experiment_name: "ac_full"
+model_type: "gsmeta"
+use_ac_inner: true
+use_mpg_context: true
+use_ac_scheduler: true
+
+# MPG settings
+mpg_hidden_dim: 64

@@ -1,0 +1,11 @@
+# Inherit from base
+defaults:
+  - model_base
+  - datasets
+
+# AC Inner Loop specific overrides
+experiment_name: "ac_inner_loop"
+model_type: "gsmeta"
+use_ac_inner: true
+ac_threshold: 0.0 # Binary classification
+inner_lr: 0.05

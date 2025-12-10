@@ -1,0 +1,15 @@
+# Dataset Configuration
+data_path: "C:\Users\yishengyuan\Downloads\ML\meta\src\data\raw\tox21.csv" # Example dataset
+dataset_name: "tox21"
+
+# Split settings
+split_type: "scaffold" # random, scaffold, etc.
+split_ratios:
+  train: 0.8
+  val: 0.1
+  test: 0.1
+
+# Few-shot settings (if applicable)
+n_way: 5
+k_shot: 10
+q_query: 10

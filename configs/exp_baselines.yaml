@@ -1,0 +1,10 @@
+# Inherit from base
+defaults:
+  - model_base
+  - datasets
+
+# Baseline specific overrides
+experiment_name: "baseline_gnn"
+model_type: "gnn" # standard supervised learning
+epochs: 50
+node_feat_dim: 6
