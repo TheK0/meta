@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fsmol-cliff"
+version = "0.1.0"
+description = "Independent FS-Mol-Cliff benchmark implementation"
+readme = "README.md"
+requires-python = ">=3.12"
+authors = [
+  { name = "OpenAI Codex" }
+]
+dependencies = [
+  "pandas>=2.2",
+  "scipy>=1.12",
+  "scikit-learn>=1.5",
+]
+
+[project.optional-dependencies]
+chem = [
+  "rdkit-pypi>=2022.9.5",
+  "pyarrow>=15.0",
+]
+dev = [
+  "pytest>=8.3",
+]
+
+[project.scripts]
+fsmol-cliff = "fsmol_cliff.cli:main"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
