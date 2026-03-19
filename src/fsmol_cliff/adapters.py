@@ -5,6 +5,7 @@ from dataclasses import dataclass
 import numpy as np
 import sklearn.ensemble
 import sklearn.neighbors
+from sklearn.model_selection import GridSearchCV
 
 from .chem import morgan_fingerprint_array
 
@@ -145,6 +146,73 @@ def score_sklearn_episode(
         molecule_id: float(score)
         for molecule_id, score in zip(query_ids, scores)
     }
+
+
+def score_official_baseline_episode(
+    *,
+    model_name: str,
+    assay_id: str,
+    records_by_id: dict[str, dict],
+    support_ids: list[str],
+    query_ids: list[str],
+    use_grid_search: bool = True,
+    model_params: dict | None = None,
+) -> dict[str, float]:
+    from .fsmol_bridge import load_module_from_script, resolve_script_path
+
+    if model_name not in {"randomForest", "kNN"}:
+        raise ValueError(f"Unsupported official baseline model: {model_name}")
+
+    baseline_spec = default_adapter_registry()["baseline"]
+    baseline_module = load_module_from_script(resolve_script_path(baseline_spec))
+    task_sample = build_sklearn_task_sample(
+        assay_id=assay_id,
+        records_by_id=records_by_id,
+        support_ids=support_ids,
+        query_ids=query_ids,
+    )
+    X_train = np.array([sample.get_fingerprint() for sample in task_sample.train_samples])
+    y_train = np.array([float(sample.bool_label) for sample in task_sample.train_samples])
+    X_test = np.array([sample.get_fingerprint() for sample in task_sample.test_samples])
+
+    if use_grid_search:
+        grid = dict(baseline_module.DEFAULT_GRID_SEARCH[model_name])
+        if model_name == "kNN":
+            grid["n_neighbors"] = [value for value in grid["n_neighbors"] if value < int(len(task_sample.train_samples) / 2)]
+        model = GridSearchCV(baseline_module.NAME_TO_MODEL_CLS[model_name](), grid)
+        model.fit(X_train, y_train)
+        estimator = model.best_estimator_
+    else:
+        estimator = baseline_module.NAME_TO_MODEL_CLS[model_name]()
+        if model_params:
+            estimator.set_params(**model_params)
+        estimator.fit(X_train, y_train)
+
+    scores = estimator.predict_proba(X_test)[:, 1]
+    return {
+        molecule_id: float(score)
+        for molecule_id, score in zip(query_ids, scores)
+    }
+
+
+def diagnose_official_adapter_availability() -> dict[str, dict[str, object]]:
+    from .fsmol_bridge import load_callable_from_spec
+
+    report: dict[str, dict[str, object]] = {}
+    for name, spec in default_adapter_registry().items():
+        try:
+            callable_obj = load_callable_from_spec(spec)
+        except Exception as exc:
+            report[name] = {
+                "available": False,
+                "reason": f"{type(exc).__name__}: {str(exc).splitlines()[0]}",
+            }
+        else:
+            report[name] = {
+                "available": True,
+                "callable": callable_obj.__name__,
+            }
+    return report
 
 
 def _record_to_episode_molecule(record: dict) -> SklearnEpisodeMolecule:

@@ -59,6 +59,7 @@ def build_parser() -> argparse.ArgumentParser:
     evaluate_parser.add_argument("--split-types", default='["standard", "adversarial"]')
     evaluate_parser.add_argument("--model-name", default="kNN")
     evaluate_parser.add_argument("--model-params", default="{}")
+    evaluate_parser.add_argument("--backend", choices=["local", "official"], default="local")
 
     aggregate_parser = subparsers.add_parser("aggregate")
     aggregate_parser.add_argument("--input", required=True)
@@ -119,6 +120,7 @@ def main() -> int:
                 split_types=json.loads(args.split_types),
                 model_name=args.model_name,
                 model_params=json.loads(args.model_params),
+                backend=args.backend,
             )
         else:
             payload = json.loads(Path(args.input).read_text())

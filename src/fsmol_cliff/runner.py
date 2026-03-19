@@ -6,7 +6,7 @@ from typing import Sequence
 
 import pandas as pd
 
-from .adapters import score_sklearn_episode
+from .adapters import score_official_baseline_episode, score_sklearn_episode
 from .evaluation import evaluate_episode_manifest, summarize_task_metric_rows
 from .io import write_parquet
 
@@ -18,6 +18,7 @@ def evaluate_release_with_sklearn_baseline(
     split_types: Sequence[str] = ("standard", "adversarial"),
     model_name: str = "kNN",
     model_params: dict | None = None,
+    backend: str = "local",
 ) -> list[dict]:
     assay_context_cache: dict[str, dict] = {}
     episode_results: list[dict] = []
@@ -29,11 +30,12 @@ def evaluate_release_with_sklearn_baseline(
         for episode in frame.to_dict(orient="records"):
             task_id = episode["task_id"]
             assay_context = assay_context_cache.setdefault(task_id, _load_assay_context(release_dir, task_id))
+            scorer = score_sklearn_episode if backend == "local" else score_official_baseline_episode
             episode_results.append(
                 evaluate_episode_manifest(
                     episode=episode,
                     assay_context=assay_context,
-                    score_fn=lambda current_episode, *, context=assay_context: score_sklearn_episode(
+                    score_fn=lambda current_episode, *, context=assay_context, scorer=scorer: scorer(
                         model_name=model_name,
                         assay_id=current_episode["task_id"],
                         records_by_id=context["records_by_id"],
