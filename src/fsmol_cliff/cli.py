@@ -9,7 +9,15 @@ import pandas as pd
 from .aggregate import aggregate_task_result_rows, macro_mean
 from .adapters import diagnose_official_adapter_availability
 from .episodes import build_adversarial_episode
-from .hypotheses import validate_h1, validate_h2, validate_h3
+from .hypotheses import (
+    compute_cliff_gap_metrics,
+    validate_h1,
+    validate_h1_model_set,
+    validate_h2,
+    validate_h2_shortcut_reliance,
+    validate_h3,
+    validate_h3_intervention,
+)
 from .io import write_json
 from .metrics import c_bacc, nc_bacc, nc_psr, q_psr, scr, sq_psr, ss_q_psr, ss_scr, ss_sq_psr
 from .models import PairRecord
@@ -157,11 +165,33 @@ def main() -> int:
             write_json(Path(args.output), macro_mean(payload))
     elif args.command == "validate-hypotheses":
         payload = json.loads(Path(args.input).read_text())
-        results = {
-            "h1": validate_h1(payload),
-            "h2": validate_h2(payload),
-            "h3": validate_h3(payload),
-        }
+        if "models" in payload:
+            results = {
+                "h1": validate_h1_model_set(payload["models"]),
+            }
+        elif "baseline" in payload and "treatment" in payload:
+            intervention_summary = {
+                **{
+                    metric_name: payload["treatment"].get(metric_name)
+                    for metric_name in ("scr", "ss_scr", "q_psr", "ss_q_psr", "sq_psr", "ss_sq_psr")
+                    if metric_name in payload["treatment"]
+                },
+                **payload,
+            }
+            results = {
+                "h2": validate_h2_shortcut_reliance(intervention_summary),
+                "h3": validate_h3_intervention(
+                    baseline=payload["baseline"],
+                    treatment=payload["treatment"],
+                ),
+            }
+        else:
+            enriched = {**payload, **compute_cliff_gap_metrics(payload)}
+            results = {
+                "h1": validate_h1(enriched),
+                "h2": validate_h2(enriched),
+                "h3": validate_h3(enriched),
+            }
         write_json(Path(args.output), results)
         if args.report:
             Path(args.report).write_text(

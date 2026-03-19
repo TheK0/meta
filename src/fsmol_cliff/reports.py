@@ -24,3 +24,15 @@ def render_markdown_report(
         lines.append(f"| {hypothesis} | {verdict} |")
     lines.append("")
     return "\n".join(lines)
+
+
+def render_hypothesis_markdown(
+    *,
+    benchmark_version: str,
+    hypothesis_results: Mapping[str, Mapping],
+) -> str:
+    return render_markdown_report(
+        benchmark_version=benchmark_version,
+        aggregate_rows=[],
+        hypothesis_results=hypothesis_results,
+    )

@@ -24,12 +24,19 @@ class BenchmarkManifest:
     constants: ProtocolConstants
 
     @classmethod
-    def default(cls) -> "BenchmarkManifest":
+    def default(
+        cls,
+        *,
+        benchmark_version: str = "v3.0",
+        fsmol_data_version: str = "<fixed_version>",
+        fsmol_episode_generator_commit: str = "<commit_hash>",
+        fsmol_metric_commit: str = "<commit_hash>",
+    ) -> "BenchmarkManifest":
         return cls(
-            benchmark_version="v3.0",
-            fsmol_data_version="<fixed_version>",
-            fsmol_episode_generator_commit="<commit_hash>",
-            fsmol_metric_commit="<commit_hash>",
+            benchmark_version=benchmark_version,
+            fsmol_data_version=fsmol_data_version,
+            fsmol_episode_generator_commit=fsmol_episode_generator_commit,
+            fsmol_metric_commit=fsmol_metric_commit,
             episode_config=DEFAULT_EPISODE_CONFIG,
             seeds=DEFAULT_SEEDS,
             episodes_per_split=DEFAULT_EPISODES_PER_SPLIT,

@@ -490,6 +490,110 @@ def test_aggregate_and_validate_commands_write_json_outputs(tmp_path: Path, monk
     assert validate_payload["h3"]["accepted"] is True
 
 
+def test_validate_hypotheses_command_supports_model_set_analysis(tmp_path: Path, monkeypatch) -> None:
+    validate_input = tmp_path / "validate_models.json"
+    validate_output = tmp_path / "validate_models_out.json"
+    validate_input.write_text(
+        json.dumps(
+            {
+                "models": {
+                    "model_a": {
+                        "official": {"task_values": [0.8, 0.82, 0.81]},
+                        "c_bacc": {"task_values": [0.45, 0.47, 0.44]},
+                        "nc_bacc": {"task_values": [0.71, 0.74, 0.72]},
+                        "q_psr": {"task_values": [0.40, 0.42, 0.41]},
+                        "nc_psr": {"task_values": [0.69, 0.71, 0.70]},
+                    },
+                    "model_b": {
+                        "official": {"task_values": [0.75, 0.74, 0.76]},
+                        "c_bacc": {"task_values": [0.60, 0.59, 0.61]},
+                        "nc_bacc": {"task_values": [0.70, 0.69, 0.71]},
+                        "q_psr": {"task_values": [0.58, 0.57, 0.59]},
+                        "nc_psr": {"task_values": [0.68, 0.67, 0.69]},
+                    },
+                    "model_c": {
+                        "official": {"task_values": [0.70, 0.69, 0.71]},
+                        "c_bacc": {"task_values": [0.54, 0.53, 0.55]},
+                        "nc_bacc": {"task_values": [0.69, 0.68, 0.70]},
+                        "q_psr": {"task_values": [0.52, 0.51, 0.53]},
+                        "nc_psr": {"task_values": [0.67, 0.66, 0.68]},
+                    },
+                }
+            }
+        )
+    )
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "fsmol-cliff",
+            "validate-hypotheses",
+            "--input",
+            str(validate_input),
+            "--output",
+            str(validate_output),
+        ],
+    )
+
+    assert main() == 0
+    payload = json.loads(validate_output.read_text())
+    assert payload["h1"]["accepted"] is True
+
+
+def test_validate_hypotheses_command_supports_intervention_analysis(tmp_path: Path, monkeypatch) -> None:
+    validate_input = tmp_path / "validate_intervention.json"
+    validate_output = tmp_path / "validate_intervention_out.json"
+    validate_input.write_text(
+        json.dumps(
+            {
+                "baseline": {
+                    "official": {"task_values": [0.60, 0.62, 0.61]},
+                    "c_bacc": {"task_values": [0.40, 0.42, 0.41]},
+                    "q_psr": {"task_values": [0.45, 0.44, 0.46]},
+                    "sq_psr": {"task_values": [0.35, 0.34, 0.36]},
+                    "nc_bacc": {"task_values": [0.70, 0.69, 0.71]},
+                    "nc_psr": {"task_values": [0.68, 0.69, 0.67]},
+                    "scr": {"task_values": [0.40, 0.41, 0.39]},
+                    "ss_scr": {"task_values": [0.46, 0.47, 0.45]},
+                    "ss_q_psr": {"task_values": [0.30, 0.29, 0.31]},
+                    "ss_sq_psr": {"task_values": [0.25, 0.24, 0.26]},
+                },
+                "treatment": {
+                    "official": {"task_values": [0.62, 0.63, 0.64]},
+                    "c_bacc": {"task_values": [0.55, 0.56, 0.57]},
+                    "q_psr": {"task_values": [0.58, 0.57, 0.59]},
+                    "sq_psr": {"task_values": [0.49, 0.48, 0.50]},
+                    "nc_bacc": {"task_values": [0.71, 0.72, 0.70]},
+                    "nc_psr": {"task_values": [0.69, 0.70, 0.68]},
+                    "scr": {"task_values": [0.22, 0.21, 0.23]},
+                    "ss_scr": {"task_values": [0.26, 0.25, 0.27]},
+                    "ss_q_psr": {"task_values": [0.44, 0.45, 0.43]},
+                    "ss_sq_psr": {"task_values": [0.39, 0.40, 0.38]},
+                },
+            }
+        )
+    )
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "fsmol-cliff",
+            "validate-hypotheses",
+            "--input",
+            str(validate_input),
+            "--output",
+            str(validate_output),
+        ],
+    )
+
+    assert main() == 0
+    payload = json.loads(validate_output.read_text())
+    assert payload["h2"]["accepted"] is True
+    assert payload["h3"]["accepted"] is True
+
+
 def test_aggregate_command_can_read_task_result_parquet(tmp_path: Path, monkeypatch) -> None:
     parquet_input = tmp_path / "task_results.parquet"
     output_file = tmp_path / "aggregate.json"

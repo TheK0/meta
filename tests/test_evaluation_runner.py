@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from fsmol_cliff.evaluation import evaluate_episode_manifest, summarize_task_metric_rows
 
 
@@ -42,6 +44,14 @@ def test_evaluate_episode_manifest_computes_core_metrics_from_manifest_context()
     assert result["metrics"]["c_bacc"] == 1.0
     assert result["metrics"]["q_psr"] == 1.0
     assert result["pair_counts"]["q_psr"] == 1
+    assert result["metrics"]["average_precision_score"] == 1.0
+    assert result["metrics"]["delta_auprc"] == 0.5
+    assert result["episode_context"]["num_support_molecules"] == 2
+    assert result["episode_context"]["fraction_positive_support"] == 0.5
+    assert result["episode_context"]["num_query_molecules"] == 2
+    assert result["episode_context"]["fraction_positive_query"] == 0.5
+    assert result["episode_context"]["num_train_requested"] == 2
+    assert result["episode_context"]["fraction_positive_test"] == 0.5
 
 
 def test_summarize_task_metric_rows_outputs_required_table_shape() -> None:
@@ -51,31 +61,60 @@ def test_summarize_task_metric_rows_outputs_required_table_shape() -> None:
                 "task_id": "CHEMBL1",
                 "seed": 0,
                 "split_type": "standard",
-                "metrics": {"c_bacc": 1.0, "q_psr": 1.0},
+                "metrics": {
+                    "c_bacc": 1.0,
+                    "q_psr": 1.0,
+                    "average_precision_score": 1.0,
+                    "delta_auprc": 0.5,
+                },
                 "pair_counts": {"c_bacc": 2, "q_psr": 1},
+                "episode_context": {
+                    "num_support_molecules": 2,
+                    "fraction_positive_support": 0.5,
+                    "num_query_molecules": 2,
+                    "fraction_positive_query": 0.5,
+                },
             },
             {
                 "task_id": "CHEMBL1",
                 "seed": 0,
                 "split_type": "standard",
-                "metrics": {"c_bacc": None, "q_psr": 0.5},
+                "metrics": {
+                    "c_bacc": None,
+                    "q_psr": 0.5,
+                    "average_precision_score": 0.25,
+                    "delta_auprc": 0.0,
+                },
                 "pair_counts": {"c_bacc": 0, "q_psr": 2},
+                "episode_context": {
+                    "num_support_molecules": 4,
+                    "fraction_positive_support": 0.25,
+                    "num_query_molecules": 4,
+                    "fraction_positive_query": 0.25,
+                },
             },
         ]
     )
 
     c_bacc_row = next(row for row in rows if row["metric"] == "c_bacc")
     q_psr_row = next(row for row in rows if row["metric"] == "q_psr")
+    ap_row = next(row for row in rows if row["metric"] == "average_precision_score")
+    delta_row = next(row for row in rows if row["metric"] == "delta_auprc")
 
-    assert c_bacc_row == {
-        "task_id": "CHEMBL1",
-        "seed": 0,
-        "split_type": "standard",
-        "metric": "c_bacc",
-        "score": 1.0,
-        "coverage": 0.5,
-        "num_valid_episodes": 1,
-        "mean_num_valid_pairs_per_episode": 2.0,
-    }
+    assert c_bacc_row["task_id"] == "CHEMBL1"
+    assert c_bacc_row["seed"] == 0
+    assert c_bacc_row["split_type"] == "standard"
+    assert c_bacc_row["metric"] == "c_bacc"
+    assert c_bacc_row["score"] == 1.0
+    assert c_bacc_row["coverage"] == 0.5
+    assert c_bacc_row["num_valid_episodes"] == 1
+    assert c_bacc_row["mean_num_valid_pairs_per_episode"] == 2.0
+    assert c_bacc_row["num_episodes"] == 2
+    assert c_bacc_row["num_support_molecules"] == 3.0
+    assert c_bacc_row["fraction_positive_support"] == pytest.approx(0.375)
+    assert c_bacc_row["num_query_molecules"] == 3.0
+    assert c_bacc_row["fraction_positive_query"] == pytest.approx(0.375)
     assert q_psr_row["score"] == 0.75
     assert q_psr_row["coverage"] == 1.0
+    assert ap_row["score"] == pytest.approx(0.625)
+    assert delta_row["score"] == pytest.approx(0.25)

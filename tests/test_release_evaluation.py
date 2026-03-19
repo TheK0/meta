@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 from fsmol_cliff.io import write_jsonl, write_parquet
 from fsmol_cliff.runner import evaluate_release_with_sklearn_baseline
@@ -97,8 +98,14 @@ def test_evaluate_release_with_sklearn_baseline_writes_task_metric_rows(tmp_path
     assert output_path.exists()
     saved = pd.read_parquet(output_path)
     c_bacc_row = next(row for row in rows if row["metric"] == "c_bacc")
+    ap_row = next(row for row in rows if row["metric"] == "average_precision_score")
+    delta_row = next(row for row in rows if row["metric"] == "delta_auprc")
     assert c_bacc_row["score"] == 1.0
-    assert list(saved["task_id"]) == ["CHEMBL1", "CHEMBL1", "CHEMBL1", "CHEMBL1", "CHEMBL1", "CHEMBL1", "CHEMBL1", "CHEMBL1", "CHEMBL1"]
+    assert ap_row["score"] == 1.0
+    assert delta_row["score"] == 0.5
+    assert delta_row["fraction_positive_query"] == 0.5
+    assert set(saved["metric"]) >= {"average_precision_score", "delta_auprc", "c_bacc", "q_psr"}
+    assert len(saved) == 11
 
 
 def test_evaluate_release_with_official_baseline_backend(tmp_path: Path) -> None:
@@ -187,4 +194,8 @@ def test_evaluate_release_with_official_baseline_backend(tmp_path: Path) -> None
     )
 
     q_psr_row = next(row for row in rows if row["metric"] == "q_psr")
+    ap_row = next(row for row in rows if row["metric"] == "average_precision_score")
+    delta_row = next(row for row in rows if row["metric"] == "delta_auprc")
     assert q_psr_row["score"] == 1.0
+    assert ap_row["score"] == 1.0
+    assert delta_row["score"] == pytest.approx(0.5)
