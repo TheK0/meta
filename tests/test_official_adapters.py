@@ -53,4 +53,7 @@ def test_diagnose_official_adapter_availability_reports_baseline_ready() -> None
 
     assert report["baseline"]["available"] is True
     assert "callable" in report["baseline"]
-    assert report["mat"]["available"] is False
+    assert report["maml"]["available"] is True
+    assert report["mat"]["available"] is True
+    assert report["multitask"]["available"] is True
+    assert report["protonet"]["available"] is True

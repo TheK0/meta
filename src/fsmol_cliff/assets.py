@@ -91,6 +91,8 @@ def mine_assay_pairs(
     cliff_pairs: list[dict[str, Any]] = []
     noncliff_pairs: list[dict[str, Any]] = []
     same_scaffold_pairs: list[dict[str, Any]] = []
+    same_scaffold_cliff_pairs: list[dict[str, Any]] = []
+    same_scaffold_noncliff_pairs: list[dict[str, Any]] = []
     hard_negative_pools: dict[str, list[dict[str, Any]]] = {}
 
     for active in actives:
@@ -127,6 +129,10 @@ def mine_assay_pairs(
                 noncliff_pairs.append(pair)
             if same_scaffold:
                 same_scaffold_pairs.append(pair)
+                if pair_type == "cliff":
+                    same_scaffold_cliff_pairs.append(pair)
+                else:
+                    same_scaffold_noncliff_pairs.append(pair)
 
         anchor_pairs.sort(key=_pair_sort_key)
         if anchor_pairs:
@@ -136,6 +142,8 @@ def mine_assay_pairs(
     cliff_pairs = _sort_pair_group(cliff_pairs)
     noncliff_pairs = _sort_pair_group(noncliff_pairs)
     same_scaffold_pairs = _sort_pair_group(same_scaffold_pairs)
+    same_scaffold_cliff_pairs = _sort_pair_group(same_scaffold_cliff_pairs)
+    same_scaffold_noncliff_pairs = _sort_pair_group(same_scaffold_noncliff_pairs)
 
     diagnostics = _build_diagnostics(
         tau=tau,
@@ -147,6 +155,7 @@ def mine_assay_pairs(
         cliff_pairs=cliff_pairs,
         noncliff_pairs=noncliff_pairs,
         same_scaffold_pairs=same_scaffold_pairs,
+        same_scaffold_cliff_pairs=same_scaffold_cliff_pairs,
         hard_negative_pools=hard_negative_pools,
     )
 
@@ -157,6 +166,8 @@ def mine_assay_pairs(
             "cliff": cliff_pairs,
             "highsim_noncliff": noncliff_pairs,
             "same_scaffold": same_scaffold_pairs,
+            "same_scaffold_cliff": same_scaffold_cliff_pairs,
+            "same_scaffold_noncliff": same_scaffold_noncliff_pairs,
         },
         "hard_negative_pools": hard_negative_pools,
         "diagnostics": diagnostics,
@@ -206,10 +217,16 @@ def _build_diagnostics(
     cliff_pairs: Sequence[dict[str, Any]],
     noncliff_pairs: Sequence[dict[str, Any]],
     same_scaffold_pairs: Sequence[dict[str, Any]],
+    same_scaffold_cliff_pairs: Sequence[dict[str, Any]],
     hard_negative_pools: Mapping[str, Sequence[dict[str, Any]]],
 ) -> dict[str, Any]:
     candidate_pairs = len(actives) * len(inactives)
     n_highsim = len(highsim_pairs)
+    all_pair_gaps = [float(pair["gap_abs"]) for pair in highsim_pairs]
+    all_pair_sims = [float(pair["sim"]) for pair in highsim_pairs]
+    greater_count = sum(1 for active in actives for inactive in inactives if active["r"] > inactive["r"])
+    lower_count = sum(1 for active in actives for inactive in inactives if active["r"] < inactive["r"])
+    directional_denominator = len(actives) * len(inactives)
 
     return {
         "tau": tau,
@@ -231,6 +248,18 @@ def _build_diagnostics(
         "highsim_pair_fraction": (n_highsim / candidate_pairs) if candidate_pairs else 0.0,
         "cliff_fraction_within_highsim": (len(cliff_pairs) / n_highsim) if n_highsim else 0.0,
         "same_scaffold_fraction_within_highsim": (len(same_scaffold_pairs) / n_highsim) if n_highsim else 0.0,
+        "num_highsim_discordant_pairs": n_highsim,
+        "num_cliff_pairs": len(cliff_pairs),
+        "num_noncliff_highsim_pairs": len(noncliff_pairs),
+        "num_same_scaffold_cliff_pairs": len(same_scaffold_cliff_pairs),
+        "median_sim": float(median(all_pair_sims)) if all_pair_sims else 0.0,
+        "median_gap_abs": float(median(all_pair_gaps)) if all_pair_gaps else 0.0,
+        "frac_pairs_with_r_active_gt_r_inactive": (
+            greater_count / directional_denominator if directional_denominator else 0.0
+        ),
+        "frac_pairs_with_r_active_lt_r_inactive": (
+            lower_count / directional_denominator if directional_denominator else 0.0
+        ),
     }
 
 

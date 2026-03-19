@@ -134,8 +134,10 @@ def test_mine_assay_pairs_derives_protocol_subsets_and_diagnostics() -> None:
         ("a2", "n2"),
         ("a2", "n1"),
     ]
-    assert [(pair["anchor_id"], pair["neg_id"]) for pair in mined["pairs"]["same_scaffold"]] == [
+    assert [(pair["anchor_id"], pair["neg_id"]) for pair in mined["pairs"]["same_scaffold_cliff"]] == [
         ("a1", "n1"),
+    ]
+    assert [(pair["anchor_id"], pair["neg_id"]) for pair in mined["pairs"]["same_scaffold_noncliff"]] == [
         ("a2", "n2"),
     ]
 
@@ -160,6 +162,14 @@ def test_mine_assay_pairs_derives_protocol_subsets_and_diagnostics() -> None:
         "highsim_pair_fraction": pytest.approx(5 / 6),
         "cliff_fraction_within_highsim": pytest.approx(3 / 5),
         "same_scaffold_fraction_within_highsim": pytest.approx(2 / 5),
+        "num_highsim_discordant_pairs": 5,
+        "num_cliff_pairs": 3,
+        "num_noncliff_highsim_pairs": 2,
+        "num_same_scaffold_cliff_pairs": 1,
+        "median_sim": pytest.approx(0.87),
+        "median_gap_abs": pytest.approx(1.5),
+        "frac_pairs_with_r_active_gt_r_inactive": pytest.approx(1.0),
+        "frac_pairs_with_r_active_lt_r_inactive": pytest.approx(0.0),
     }
 
 
