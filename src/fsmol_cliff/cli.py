@@ -1,24 +1,115 @@
 from __future__ import annotations
 
 import argparse
+import json
+from pathlib import Path
+
+from .aggregate import macro_mean
+from .episodes import build_adversarial_episode
+from .hypotheses import validate_h1, validate_h2, validate_h3
+from .io import write_json
+from .metrics import c_bacc, nc_bacc, nc_psr, q_psr, scr, sq_psr, ss_q_psr, ss_scr, ss_sq_psr
+from .models import PairRecord
+from .pipeline import build_assay_asset_bundle
+from .fetch import write_source_manifest
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="fsmol-cliff")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    subparsers.add_parser("fetch-fsmol")
-    subparsers.add_parser("build-assets")
-    subparsers.add_parser("build-episodes")
-    subparsers.add_parser("evaluate")
-    subparsers.add_parser("aggregate")
-    subparsers.add_parser("validate-hypotheses")
+    fetch_parser = subparsers.add_parser("fetch-fsmol")
+    fetch_parser.add_argument("--data-dir", required=True)
+    fetch_parser.add_argument("--source-url")
+    fetch_parser.add_argument("--task-list-file")
+    fetch_parser.add_argument("--fsmol-data-version", default="fsmol-0.1")
+    fetch_parser.add_argument(
+        "--output",
+        default="benchmark_manifest.source.json",
+        help="Path for the captured FS-Mol source manifest.",
+    )
+    build_assets_parser = subparsers.add_parser("build-assets")
+    build_assets_parser.add_argument("--task-file", required=True)
+    build_assets_parser.add_argument("--output-dir", required=True)
+
+    build_episodes_parser = subparsers.add_parser("build-episodes")
+    build_episodes_parser.add_argument("--input", required=True)
+    build_episodes_parser.add_argument("--output", required=True)
+
+    evaluate_parser = subparsers.add_parser("evaluate")
+    evaluate_parser.add_argument("--input", required=True)
+    evaluate_parser.add_argument("--output", required=True)
+
+    aggregate_parser = subparsers.add_parser("aggregate")
+    aggregate_parser.add_argument("--input", required=True)
+    aggregate_parser.add_argument("--output", required=True)
+
+    validate_parser = subparsers.add_parser("validate-hypotheses")
+    validate_parser.add_argument("--input", required=True)
+    validate_parser.add_argument("--output", required=True)
     return parser
 
 
 def main() -> int:
     parser = build_parser()
-    parser.parse_args()
+    args = parser.parse_args()
+    if args.command == "fetch-fsmol":
+        write_source_manifest(
+            output_path=Path(args.output),
+            data_dir=Path(args.data_dir),
+            source_url=args.source_url,
+            task_list_file=Path(args.task_list_file) if args.task_list_file else None,
+            fsmol_data_version=args.fsmol_data_version,
+        )
+    elif args.command == "build-assets":
+        build_assay_asset_bundle(
+            task_file=Path(args.task_file),
+            output_dir=Path(args.output_dir),
+        )
+    elif args.command == "build-episodes":
+        payload = json.loads(Path(args.input).read_text())
+        episode = build_adversarial_episode(
+            support_pos_ids=payload["support_pos_ids"],
+            support_neg_ids=payload["support_neg_ids"],
+            query_pos_ids=payload["query_pos_ids"],
+            query_neg_ids=payload["query_neg_ids"],
+            cliff_pairs=[PairRecord(**pair) for pair in payload["cliff_pairs"]],
+            anchor_to_hardnegs=payload["anchor_to_hardnegs"],
+        )
+        write_json(Path(args.output), None if episode is None else episode.to_dict())
+    elif args.command == "evaluate":
+        payload = json.loads(Path(args.input).read_text())
+        query_pairs = [PairRecord(**pair) for pair in payload.get("query_pairs", [])]
+        noncliff_pairs = [PairRecord(**pair) for pair in payload.get("noncliff_pairs", [])]
+        support_query_pairs = [PairRecord(**pair) for pair in payload.get("support_query_pairs", [])]
+        labels = payload["labels"]
+        scores = payload["scores"]
+        predictions = payload["predictions"]
+        summary = {
+            "c_bacc": c_bacc(None, labels, predictions, payload.get("cliff_query_ids", [])),
+            "nc_bacc": nc_bacc(None, labels, predictions, payload.get("noncliff_query_ids", [])),
+            "q_psr": q_psr(None, query_pairs, scores),
+            "nc_psr": nc_psr(None, noncliff_pairs, scores),
+            "sq_psr": sq_psr(None, support_query_pairs, scores),
+            "scr": scr(None, query_pairs + noncliff_pairs, predictions),
+            "ss_q_psr": ss_q_psr(None, query_pairs, scores),
+            "ss_scr": ss_scr(None, query_pairs + noncliff_pairs, predictions),
+            "ss_sq_psr": ss_sq_psr(None, support_query_pairs, scores),
+        }
+        write_json(Path(args.output), summary)
+    elif args.command == "aggregate":
+        payload = json.loads(Path(args.input).read_text())
+        write_json(Path(args.output), macro_mean(payload))
+    elif args.command == "validate-hypotheses":
+        payload = json.loads(Path(args.input).read_text())
+        write_json(
+            Path(args.output),
+            {
+                "h1": validate_h1(payload),
+                "h2": validate_h2(payload),
+                "h3": validate_h3(payload),
+            },
+        )
     return 0
 
 

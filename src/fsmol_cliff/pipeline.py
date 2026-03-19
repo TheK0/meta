@@ -1,0 +1,64 @@
+from __future__ import annotations
+
+import gzip
+import json
+from pathlib import Path
+from typing import Any
+
+from .assets import build_assay_assets
+from .chem import murcko_scaffold_smiles
+from .io import write_json, write_jsonl, write_parquet
+
+
+def load_task_records(task_file: Path) -> list[dict[str, Any]]:
+    opener = gzip.open if task_file.suffix == ".gz" else open
+    with opener(task_file, "rt") as handle:
+        return [json.loads(line) for line in handle if line.strip()]
+
+
+def build_assay_asset_bundle(task_file: Path, output_dir: Path) -> dict[str, Any]:
+    records = load_task_records(task_file)
+    assay_id = _assay_id_for_records(task_file, records)
+    bundle = build_assay_assets(assay_id, records)
+
+    molecules = [
+        {
+            "molecule_id": record["molecule_id"],
+            "canonical_isomeric_smiles": record["canonical_isomeric_smiles"],
+            "label": record["label"],
+            "r": record["r"],
+            "scaffold_smiles": murcko_scaffold_smiles(record["canonical_isomeric_smiles"])
+            or "EMPTY_SCAFFOLD",
+        }
+        for record in bundle["molecules"]
+    ]
+    pairs = bundle["pairs"]["cliff"] + bundle["pairs"]["highsim_noncliff"]
+    hard_negatives = {
+        anchor_id: [pair["neg_id"] for pair in pool]
+        for anchor_id, pool in bundle["hard_negative_pools"].items()
+    }
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    write_jsonl(output_dir / "pairs.jsonl", pairs)
+    write_json(output_dir / "anchor_to_hardnegs.json", hard_negatives)
+    write_parquet(output_dir / "molecule_annotations.parquet", molecules)
+    write_json(output_dir / "diagnostics.json", bundle["diagnostics"])
+
+    return {
+        "assay_id": assay_id,
+        "molecules": molecules,
+        "pairs": pairs,
+        "hard_negatives": hard_negatives,
+        "diagnostics": bundle["diagnostics"],
+    }
+
+
+def _assay_id_for_records(task_file: Path, records: list[dict[str, Any]]) -> str:
+    if records and records[0].get("Assay_ID"):
+        return str(records[0]["Assay_ID"])
+    name = task_file.name
+    if name.endswith(".jsonl.gz"):
+        return name[: -len(".jsonl.gz")]
+    if name.endswith(".jsonl"):
+        return name[: -len(".jsonl")]
+    return task_file.stem
