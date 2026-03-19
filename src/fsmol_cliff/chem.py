@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from functools import lru_cache
 
+import numpy as np
+
 
 def rdkit_is_available() -> bool:
     try:
@@ -42,7 +44,10 @@ def murcko_scaffold_smiles(smiles: str | None) -> str | None:
         return None
 
     _, _, _, murcko_scaffold = _load_rdkit()
-    scaffold = murcko_scaffold.MurckoScaffoldSmilesFromSmiles(value)
+    try:
+        scaffold = murcko_scaffold.MurckoScaffoldSmilesFromSmiles(value)
+    except ValueError:
+        return None
     return scaffold or None
 
 
@@ -60,6 +65,19 @@ def tanimoto_similarity(smiles_a: str | None, smiles_b: str | None) -> float | N
 
     _, data_structs, _, _ = _load_rdkit()
     return float(data_structs.TanimotoSimilarity(fingerprint_a, fingerprint_b))
+
+
+def morgan_fingerprint_array(smiles: str | None) -> np.ndarray | None:
+    canonical_smiles = canonicalize_isomeric_smiles(smiles)
+    if canonical_smiles is None or not rdkit_is_available():
+        return None
+    fingerprint = _morgan_fingerprint(canonical_smiles)
+    if fingerprint is None:
+        return None
+    _, data_structs, _, _ = _load_rdkit()
+    array = np.zeros((2048,), dtype=np.int8)
+    data_structs.ConvertToNumpyArray(fingerprint, array)
+    return array
 
 
 @lru_cache(maxsize=8192)
@@ -80,6 +98,7 @@ def _normalize_smiles(smiles: str | None) -> str | None:
 
 __all__ = [
     "canonicalize_isomeric_smiles",
+    "morgan_fingerprint_array",
     "murcko_scaffold_smiles",
     "rdkit_is_available",
     "tanimoto_similarity",

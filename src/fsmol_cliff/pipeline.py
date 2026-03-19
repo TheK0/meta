@@ -48,7 +48,9 @@ def build_assay_asset_bundle(task_file: Path, output_dir: Path) -> dict[str, Any
         "assay_id": assay_id,
         "molecules": molecules,
         "pairs": pairs,
+        "pair_groups": bundle["pairs"],
         "hard_negatives": hard_negatives,
+        "hard_negative_pools": bundle["hard_negative_pools"],
         "diagnostics": bundle["diagnostics"],
     }
 

@@ -46,6 +46,28 @@ def compute_adversarial_injection_count(
     return min(query_neg_count // 2, support_pos_count, m_avail)
 
 
+def select_injected_pairs(
+    support_pos_ids: Sequence[str],
+    query_neg_ids: Sequence[str],
+    cliff_pairs: Sequence[PairRecord],
+    anchor_to_hardnegs: Mapping[str, Sequence[str]],
+    injection_count: int,
+) -> list[PairRecord]:
+    ordered_pairs = _filter_pairs_by_hardneg_order(
+        support_pos_ids=support_pos_ids,
+        query_neg_ids=query_neg_ids,
+        cliff_pairs=cliff_pairs,
+        anchor_to_hardnegs=anchor_to_hardnegs,
+    )
+    return _select_injected_pairs(
+        support_pos_ids=support_pos_ids,
+        query_neg_ids=query_neg_ids,
+        cliff_pairs=ordered_pairs,
+        anchor_to_hardnegs=anchor_to_hardnegs,
+        injection_count=injection_count,
+    )
+
+
 def build_adversarial_episode(
     support_pos_ids: Sequence[str],
     support_neg_ids: Sequence[str],
@@ -80,7 +102,7 @@ def build_adversarial_episode(
     if injection_count < 2:
         return None
 
-    injected_pairs = _select_injected_pairs(
+    injected_pairs = select_injected_pairs(
         support_pos_ids=support_pos_ids,
         query_neg_ids=query_neg_ids,
         cliff_pairs=ordered_pairs,

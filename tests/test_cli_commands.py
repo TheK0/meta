@@ -5,10 +5,13 @@ import json
 import sys
 from pathlib import Path
 
+import pandas as pd
+
 from fsmol_cliff.cli import main
 
 
 def _write_jsonl_gz(path: Path, records: list[dict]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
     with gzip.open(path, "wt") as handle:
         for record in records:
             handle.write(json.dumps(record) + "\n")
@@ -99,6 +102,73 @@ def test_build_episodes_command_writes_adversarial_manifest(tmp_path: Path, monk
     assert len(payload["injected_pairs"]) == 2
 
 
+def test_build_release_command_writes_release_bundle(tmp_path: Path, monkeypatch) -> None:
+    data_dir = tmp_path / "fsmol"
+    task_dir = data_dir / "test"
+    task_list = tmp_path / "tasks.json"
+    output_dir = tmp_path / "release"
+
+    _write_jsonl_gz(
+        task_dir / "CHEMBL1.jsonl.gz",
+        [
+            {
+                "Assay_ID": "CHEMBL1",
+                "compound_id": f"p{i:02d}",
+                "Y": 1,
+                "Relation": "=",
+                "LogRegressionProperty": 8.0 if i <= 15 else 7.0,
+                "CanonicalIsomericSmiles": f"P{i:02d}",
+            }
+            for i in range(1, 26)
+        ]
+        + [
+            {
+                "Assay_ID": "CHEMBL1",
+                "compound_id": f"n{i:02d}",
+                "Y": 0,
+                "Relation": "=",
+                "LogRegressionProperty": 6.5 if i <= 15 else 6.4,
+                "CanonicalIsomericSmiles": f"N{i:02d}",
+            }
+            for i in range(1, 26)
+        ],
+    )
+    task_list.write_text(json.dumps({"test": ["CHEMBL1"]}))
+
+    monkeypatch.setattr(
+        "fsmol_cliff.assets.tanimoto_similarity",
+        lambda a, b: 0.9 if a and b and a[0] != b[0] else 0.1,
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "fsmol-cliff",
+            "build-release",
+            "--data-dir",
+            str(data_dir),
+            "--task-list-file",
+            str(task_list),
+            "--output-dir",
+            str(output_dir),
+            "--support-per-class",
+            "2",
+            "--query-per-class",
+            "4",
+            "--episodes-per-split",
+            "1",
+            "--seeds",
+            "[0]",
+            "--fsmol-data-version",
+            "fsmol-test",
+        ],
+    )
+
+    assert main() == 0
+    assert (output_dir / "benchmark_manifest.json").exists()
+    assert (output_dir / "episodes_standard.parquet").exists()
+
+
 def test_evaluate_command_writes_metric_summary(tmp_path: Path, monkeypatch) -> None:
     input_file = tmp_path / "eval.json"
     output_file = tmp_path / "metrics.json"
@@ -139,6 +209,109 @@ def test_evaluate_command_writes_metric_summary(tmp_path: Path, monkeypatch) -> 
     payload = json.loads(output_file.read_text())
     assert payload["c_bacc"] == 1.0
     assert payload["q_psr"] == 1.0
+
+
+def test_evaluate_command_can_run_release_mode(tmp_path: Path, monkeypatch) -> None:
+    release_dir = tmp_path / "release"
+    assay_dir = release_dir / "assays" / "CHEMBL1"
+    assay_dir.mkdir(parents=True)
+    output_file = tmp_path / "task_results.parquet"
+
+    from fsmol_cliff.io import write_jsonl, write_parquet
+
+    write_parquet(
+        assay_dir / "molecule_annotations.parquet",
+        [
+            {
+                "molecule_id": "a1",
+                "canonical_isomeric_smiles": "CCO",
+                "label": 1,
+                "r": 8.0,
+                "scaffold_smiles": "CC",
+                "fingerprint": [1.0, 1.0, 0.0, 0.0],
+            },
+            {
+                "molecule_id": "n1",
+                "canonical_isomeric_smiles": "CCN",
+                "label": 0,
+                "r": 6.0,
+                "scaffold_smiles": "CC",
+                "fingerprint": [0.0, 0.0, 1.0, 1.0],
+            },
+            {
+                "molecule_id": "qa",
+                "canonical_isomeric_smiles": "CCF",
+                "label": 1,
+                "r": 8.2,
+                "scaffold_smiles": "CC",
+                "fingerprint": [1.0, 0.8, 0.0, 0.0],
+            },
+            {
+                "molecule_id": "qn",
+                "canonical_isomeric_smiles": "CCC",
+                "label": 0,
+                "r": 6.1,
+                "scaffold_smiles": "CC",
+                "fingerprint": [0.0, 0.0, 0.8, 1.0],
+            },
+        ],
+    )
+    write_jsonl(
+        assay_dir / "pairs.jsonl",
+        [
+            {
+                "assay_id": "CHEMBL1",
+                "anchor_id": "qa",
+                "neg_id": "qn",
+                "sim": 0.9,
+                "gap_abs": 1.1,
+                "same_scaffold": True,
+                "pair_type": "cliff",
+                "anchor_label": 1,
+                "neg_label": 0,
+            }
+        ],
+    )
+    write_parquet(
+        release_dir / "episodes_standard.parquet",
+        [
+            {
+                "task_id": "CHEMBL1",
+                "seed": 0,
+                "split_type": "standard",
+                "episode_id": 0,
+                "support_pos_ids": ["a1"],
+                "support_neg_ids": ["n1"],
+                "query_pos_ids": ["qa"],
+                "query_neg_ids": ["qn"],
+                "injected_pairs": [],
+            }
+        ],
+    )
+    write_parquet(release_dir / "episodes_adversarial.parquet", [])
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "fsmol-cliff",
+            "evaluate",
+            "--release-dir",
+            str(release_dir),
+            "--output",
+            str(output_file),
+            "--split-types",
+            '["standard"]',
+            "--model-name",
+            "kNN",
+            "--model-params",
+            '{"n_neighbors": 1}',
+        ],
+    )
+
+    assert main() == 0
+    saved = pd.read_parquet(output_file)
+    assert set(saved["metric"]) >= {"c_bacc", "q_psr"}
 
 
 def test_aggregate_and_validate_commands_write_json_outputs(tmp_path: Path, monkeypatch) -> None:
@@ -196,3 +369,31 @@ def test_aggregate_and_validate_commands_write_json_outputs(tmp_path: Path, monk
     assert validate_payload["h1"]["accepted"] is True
     assert validate_payload["h2"]["accepted"] is True
     assert validate_payload["h3"]["accepted"] is True
+
+
+def test_aggregate_command_can_read_task_result_parquet(tmp_path: Path, monkeypatch) -> None:
+    parquet_input = tmp_path / "task_results.parquet"
+    output_file = tmp_path / "aggregate.json"
+
+    from fsmol_cliff.io import write_parquet
+
+    write_parquet(
+        parquet_input,
+        [
+            {"task_id": "t1", "seed": 0, "split_type": "standard", "metric": "q_psr", "score": 0.4},
+            {"task_id": "t1", "seed": 1, "split_type": "standard", "metric": "q_psr", "score": 0.6},
+            {"task_id": "t2", "seed": 0, "split_type": "standard", "metric": "q_psr", "score": 0.2},
+            {"task_id": "t2", "seed": 1, "split_type": "standard", "metric": "q_psr", "score": 0.4},
+        ],
+    )
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["fsmol-cliff", "aggregate", "--input", str(parquet_input), "--output", str(output_file)],
+    )
+
+    assert main() == 0
+    payload = json.loads(output_file.read_text())
+    assert payload[0]["metric"] == "q_psr"
+    assert payload[0]["score"] == 0.4

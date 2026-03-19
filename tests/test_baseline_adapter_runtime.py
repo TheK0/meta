@@ -85,3 +85,37 @@ def test_score_sklearn_episode_returns_query_scores_in_manifest_order() -> None:
 
     assert list(scores) == ["q_active", "q_inactive"]
     assert scores["q_active"] > scores["q_inactive"]
+
+
+def test_build_sklearn_task_sample_computes_fingerprint_from_smiles_when_missing() -> None:
+    records_by_id = {
+        "a1": {
+            "molecule_id": "a1",
+            "canonical_isomeric_smiles": "CCO",
+            "label": 1,
+        },
+        "n1": {
+            "molecule_id": "n1",
+            "canonical_isomeric_smiles": "CCN",
+            "label": 0,
+        },
+        "q1": {
+            "molecule_id": "q1",
+            "canonical_isomeric_smiles": "CCF",
+            "label": 1,
+        },
+        "q2": {
+            "molecule_id": "q2",
+            "canonical_isomeric_smiles": "CCC",
+            "label": 0,
+        },
+    }
+
+    task_sample = build_sklearn_task_sample(
+        assay_id="CHEMBL1",
+        records_by_id=records_by_id,
+        support_ids=["a1", "n1"],
+        query_ids=["q1", "q2"],
+    )
+
+    assert task_sample.train_samples[0].get_fingerprint().shape[0] == 2048

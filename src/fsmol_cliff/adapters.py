@@ -6,6 +6,8 @@ import numpy as np
 import sklearn.ensemble
 import sklearn.neighbors
 
+from .chem import morgan_fingerprint_array
+
 
 NAME_TO_MODEL_CLS = {
     "randomForest": sklearn.ensemble.RandomForestClassifier,
@@ -146,9 +148,14 @@ def score_sklearn_episode(
 
 
 def _record_to_episode_molecule(record: dict) -> SklearnEpisodeMolecule:
+    fingerprint = record.get("fingerprint")
+    if fingerprint is None:
+        fingerprint = morgan_fingerprint_array(record["canonical_isomeric_smiles"])
+    if fingerprint is None:
+        raise ValueError(f"Could not derive fingerprint for molecule {record['molecule_id']}")
     return SklearnEpisodeMolecule(
         molecule_id=str(record["molecule_id"]),
         smiles=str(record["canonical_isomeric_smiles"]),
         bool_label=bool(record["label"]),
-        fingerprint=np.array(record["fingerprint"]),
+        fingerprint=np.array(fingerprint),
     )
