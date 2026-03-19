@@ -42,6 +42,7 @@ def test_cli_exposes_expected_top_level_subcommands() -> None:
 
     assert set(subparsers_action.choices) == {
         "fetch-fsmol",
+        "adapter-status",
         "build-assets",
         "build-release",
         "build-episodes",

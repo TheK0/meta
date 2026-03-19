@@ -7,6 +7,7 @@ from pathlib import Path
 import pandas as pd
 
 from .aggregate import aggregate_task_result_rows, macro_mean
+from .adapters import diagnose_official_adapter_availability
 from .episodes import build_adversarial_episode
 from .hypotheses import validate_h1, validate_h2, validate_h3
 from .io import write_json
@@ -34,6 +35,8 @@ def build_parser() -> argparse.ArgumentParser:
         default="benchmark_manifest.source.json",
         help="Path for the captured FS-Mol source manifest.",
     )
+    adapter_status_parser = subparsers.add_parser("adapter-status")
+    adapter_status_parser.add_argument("--output", required=True)
     build_assets_parser = subparsers.add_parser("build-assets")
     build_assets_parser.add_argument("--task-file", required=True)
     build_assets_parser.add_argument("--output-dir", required=True)
@@ -83,6 +86,8 @@ def main() -> int:
             task_list_file=Path(args.task_list_file) if args.task_list_file else None,
             fsmol_data_version=args.fsmol_data_version,
         )
+    elif args.command == "adapter-status":
+        write_json(Path(args.output), diagnose_official_adapter_availability())
     elif args.command == "build-assets":
         build_assay_asset_bundle(
             task_file=Path(args.task_file),

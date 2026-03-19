@@ -52,6 +52,20 @@ def test_build_assets_command_writes_asset_bundle(tmp_path: Path, monkeypatch) -
     assert (output_dir / "pairs.jsonl").exists()
 
 
+def test_adapter_status_command_writes_availability_report(tmp_path: Path, monkeypatch) -> None:
+    output_file = tmp_path / "adapter_status.json"
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["fsmol-cliff", "adapter-status", "--output", str(output_file)],
+    )
+
+    assert main() == 0
+    payload = json.loads(output_file.read_text())
+    assert payload["baseline"]["available"] is True
+
+
 def test_build_episodes_command_writes_adversarial_manifest(tmp_path: Path, monkeypatch) -> None:
     spec_file = tmp_path / "episode_spec.json"
     out_file = tmp_path / "episode.json"
