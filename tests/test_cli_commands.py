@@ -180,7 +180,7 @@ def test_build_release_command_writes_release_bundle(tmp_path: Path, monkeypatch
 
     assert main() == 0
     assert (output_dir / "benchmark_manifest.json").exists()
-    assert (output_dir / "episodes_standard.parquet").exists()
+    assert (output_dir / "episodes_standard_strict.parquet").exists()
 
 
 def test_evaluate_command_writes_metric_summary(tmp_path: Path, monkeypatch) -> None:
@@ -431,6 +431,172 @@ def test_evaluate_command_can_run_release_mode_with_official_backend(tmp_path: P
     assert main() == 0
     saved = pd.read_parquet(output_file)
     assert set(saved["metric"]) >= {"c_bacc", "q_psr"}
+
+
+def test_evaluate_command_can_run_release_mode_with_protonet_backend(tmp_path: Path, monkeypatch) -> None:
+    release_dir = tmp_path / "release"
+    output_file = tmp_path / "task_results.parquet"
+    calls: dict[str, object] = {}
+
+    def fake_evaluate_release_with_protonet(**kwargs):
+        calls.update(kwargs)
+        pd.DataFrame(
+            [
+                {
+                    "task_id": "CHEMBL1",
+                    "seed": 0,
+                    "split_type": "standard",
+                    "metric": "q_psr",
+                    "score": 1.0,
+                    "coverage": 1.0,
+                    "num_episodes": 1,
+                    "num_valid_episodes": 1,
+                    "mean_num_valid_pairs_per_episode": 1.0,
+                }
+            ]
+        ).to_parquet(kwargs["output_path"], index=False)
+        return []
+
+    monkeypatch.setattr("fsmol_cliff.cli.evaluate_release_with_protonet", fake_evaluate_release_with_protonet)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "fsmol-cliff",
+            "evaluate",
+            "--release-dir",
+            str(release_dir),
+            "--data-dir",
+            str(tmp_path / "fsmol"),
+            "--checkpoint",
+            str(tmp_path / "pn.pt"),
+            "--output",
+            str(output_file),
+            "--split-types",
+            '["standard"]',
+            "--backend",
+            "protonet",
+        ],
+    )
+
+    assert main() == 0
+    assert calls["release_dir"] == release_dir
+    assert calls["data_dir"] == tmp_path / "fsmol"
+    assert calls["checkpoint_path"] == tmp_path / "pn.pt"
+    saved = pd.read_parquet(output_file)
+    assert set(saved["metric"]) >= {"q_psr"}
+
+
+def test_evaluate_command_can_run_release_mode_with_protonet_backend(
+    tmp_path: Path, monkeypatch
+) -> None:
+    release_dir = tmp_path / "release"
+    output_file = tmp_path / "task_results.parquet"
+    checkpoint_path = tmp_path / "pn.pt"
+    data_dir = tmp_path / "fsmol"
+
+    calls: list[dict] = []
+
+    def fake_evaluate_release_with_protonet(**kwargs):
+        calls.append(kwargs)
+        pd.DataFrame(
+            [
+                {
+                    "task_id": "CHEMBL1",
+                    "seed": 0,
+                    "split_type": "standard",
+                    "metric": "q_psr",
+                    "score": 1.0,
+                    "coverage": 1.0,
+                    "num_episodes": 1,
+                    "num_valid_episodes": 1,
+                    "mean_num_valid_pairs_per_episode": 1.0,
+                }
+            ]
+        ).to_parquet(kwargs["output_path"], index=False)
+        return []
+
+    monkeypatch.setattr(
+        "fsmol_cliff.cli.evaluate_release_with_protonet",
+        fake_evaluate_release_with_protonet,
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "fsmol-cliff",
+            "evaluate",
+            "--release-dir",
+            str(release_dir),
+            "--data-dir",
+            str(data_dir),
+            "--checkpoint",
+            str(checkpoint_path),
+            "--output",
+            str(output_file),
+            "--split-types",
+            '["standard"]',
+            "--backend",
+            "protonet",
+        ],
+    )
+
+    assert main() == 0
+    assert calls[0]["release_dir"] == release_dir
+    assert calls[0]["data_dir"] == data_dir
+    assert calls[0]["checkpoint_path"] == checkpoint_path
+    saved = pd.read_parquet(output_file)
+    assert set(saved["metric"]) == {"q_psr"}
+
+
+def test_evaluate_command_can_run_release_mode_with_protonet_backend(
+    tmp_path: Path, monkeypatch
+) -> None:
+    output_file = tmp_path / "task_results_protonet.parquet"
+
+    def fake_evaluate_release_with_protonet(**kwargs):
+        pd.DataFrame(
+            [
+                {
+                    "task_id": "CHEMBL1",
+                    "seed": 0,
+                    "split_type": "standard",
+                    "metric": "q_psr",
+                    "score": 1.0,
+                    "coverage": 1.0,
+                    "num_episodes": 1,
+                    "num_valid_episodes": 1,
+                    "mean_num_valid_pairs_per_episode": 1.0,
+                }
+            ]
+        ).to_parquet(kwargs["output_path"], index=False)
+        return []
+
+    monkeypatch.setattr(
+        "fsmol_cliff.cli.evaluate_release_with_protonet",
+        fake_evaluate_release_with_protonet,
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "fsmol-cliff",
+            "evaluate",
+            "--release-dir",
+            str(tmp_path / "release"),
+            "--data-dir",
+            str(tmp_path / "fsmol"),
+            "--checkpoint",
+            str(tmp_path / "PN-Support64_best_validation.pt"),
+            "--output",
+            str(output_file),
+            "--backend",
+            "protonet",
+        ],
+    )
+
+    assert main() == 0
+    assert output_file.exists()
 
 
 def test_aggregate_and_validate_commands_write_json_outputs(tmp_path: Path, monkeypatch) -> None:

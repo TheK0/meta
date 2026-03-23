@@ -27,7 +27,7 @@ def _eligible_records() -> list[dict]:
                 "Y": 1,
                 "Relation": "=",
                 "LogRegressionProperty": 8.0 if index <= 15 else 7.0,
-                "CanonicalIsomericSmiles": f"P{index:02d}",
+                "CanonicalIsomericSmiles": "C" * index,
             }
         )
     for index in range(1, 26):
@@ -38,7 +38,7 @@ def _eligible_records() -> list[dict]:
                 "Y": 0,
                 "Relation": "=",
                 "LogRegressionProperty": 6.5 if index <= 15 else 6.4,
-                "CanonicalIsomericSmiles": f"N{index:02d}",
+                "CanonicalIsomericSmiles": ("C" * (index - 1)) + "N",
             }
         )
     return records
@@ -54,7 +54,7 @@ def _small_records() -> list[dict]:
                 "Y": 1,
                 "Relation": "=",
                 "LogRegressionProperty": 8.0,
-                "CanonicalIsomericSmiles": f"SP{index:02d}",
+                "CanonicalIsomericSmiles": "C" * index,
             }
         )
         records.append(
@@ -64,13 +64,15 @@ def _small_records() -> list[dict]:
                 "Y": 0,
                 "Relation": "=",
                 "LogRegressionProperty": 6.0,
-                "CanonicalIsomericSmiles": f"SN{index:02d}",
+                "CanonicalIsomericSmiles": ("C" * (index - 1)) + "N",
             }
         )
     return records
 
 
-def test_build_release_bundle_writes_task_lists_and_manifests(tmp_path: Path, monkeypatch) -> None:
+def test_build_release_bundle_writes_profile_aware_task_lists_and_manifests(
+    tmp_path: Path, monkeypatch
+) -> None:
     data_dir = tmp_path / "fsmol"
     test_dir = data_dir / "test"
     output_dir = tmp_path / "release"
@@ -83,13 +85,23 @@ def test_build_release_bundle_writes_task_lists_and_manifests(tmp_path: Path, mo
     def fake_similarity(smiles_a: str | None, smiles_b: str | None) -> float | None:
         if not smiles_a or not smiles_b:
             return None
-        if smiles_a.startswith("P") and smiles_b.startswith("N"):
-            pos_index = int(smiles_a[1:])
-            neg_index = int(smiles_b[1:])
-        elif smiles_a.startswith("N") and smiles_b.startswith("P"):
-            pos_index = int(smiles_b[1:])
-            neg_index = int(smiles_a[1:])
-        else:
+
+        def positive_index(smiles: str) -> int | None:
+            return len(smiles) if set(smiles) == {"C"} else None
+
+        def negative_index(smiles: str) -> int | None:
+            if not smiles.endswith("N"):
+                return None
+            if set(smiles[:-1]) <= {"C"}:
+                return len(smiles)
+            return None
+
+        pos_index = positive_index(smiles_a)
+        neg_index = negative_index(smiles_b)
+        if pos_index is None or neg_index is None:
+            pos_index = positive_index(smiles_b)
+            neg_index = negative_index(smiles_a)
+        if pos_index is None or neg_index is None:
             return 0.1
         if pos_index <= 15 and neg_index <= 15 and abs(pos_index - neg_index) <= 1:
             return 0.9
@@ -99,30 +111,79 @@ def test_build_release_bundle_writes_task_lists_and_manifests(tmp_path: Path, mo
 
     monkeypatch.setattr("fsmol_cliff.assets.tanimoto_similarity", fake_similarity)
 
-    release = build_release_bundle(
+    strict_release = build_release_bundle(
         data_dir=data_dir,
         output_dir=output_dir,
         task_list_file=task_list_file,
         episode_config=EpisodeConfig(support_per_class=2, query_per_class=4),
         seeds=[0],
         episodes_per_split=1,
+        profile="strict",
+        fsmol_data_version="fsmol-test",
+    )
+    relaxed_release = build_release_bundle(
+        data_dir=data_dir,
+        output_dir=output_dir,
+        task_list_file=task_list_file,
+        episode_config=EpisodeConfig(support_per_class=2, query_per_class=4),
+        seeds=[0],
+        episodes_per_split=1,
+        profile="relaxed",
         fsmol_data_version="fsmol-test",
     )
 
-    assert release["eligible_tasks"] == ["CHEMBL_ELIGIBLE"]
-    assert json.loads((output_dir / "fsmol_cliff_all.json").read_text()) == ["CHEMBL_ELIGIBLE"]
-    assert json.loads((output_dir / "fsmol_cliff_30.json").read_text()) == ["CHEMBL_ELIGIBLE"]
-    assert json.loads((output_dir / "fsmol_cliff_adv_eligible.json").read_text()) == ["CHEMBL_ELIGIBLE"]
+    assert strict_release["eligible_tasks"] == ["CHEMBL_ELIGIBLE"]
+    assert relaxed_release["eligible_tasks"] == ["CHEMBL_ELIGIBLE"]
+    assert json.loads((output_dir / "fsmol_cliff_strict_all.json").read_text()) == ["CHEMBL_ELIGIBLE"]
+    assert json.loads((output_dir / "fsmol_cliff_strict_30.json").read_text()) == ["CHEMBL_ELIGIBLE"]
+    assert json.loads((output_dir / "fsmol_cliff_strict_adv_eligible.json").read_text()) == ["CHEMBL_ELIGIBLE"]
+    assert json.loads((output_dir / "fsmol_cliff_relaxed_all.json").read_text()) == ["CHEMBL_ELIGIBLE"]
+    assert json.loads((output_dir / "fsmol_cliff_relaxed_30.json").read_text()) == ["CHEMBL_ELIGIBLE"]
+    assert json.loads((output_dir / "fsmol_cliff_relaxed_adv_eligible.json").read_text()) == ["CHEMBL_ELIGIBLE"]
 
     benchmark_manifest = json.loads((output_dir / "benchmark_manifest.json").read_text())
+    assert benchmark_manifest["benchmark_version"] == "v4.0"
     assert benchmark_manifest["fsmol_data_version"] == "fsmol-test"
     assert benchmark_manifest["episode_config"]["query_per_class"] == 4
+    assert benchmark_manifest["built_profiles"] == ["relaxed", "strict"]
+    assert benchmark_manifest["profiles"]["strict"]["similarity_threshold"] == 0.85
+    assert benchmark_manifest["profiles"]["relaxed"]["similarity_threshold"] == 0.8
 
-    assert (output_dir / "assays" / "CHEMBL_ELIGIBLE" / "pairs.jsonl").exists()
-    assert (output_dir / "episodes_standard.parquet").exists()
-    assert (output_dir / "episodes_adversarial.parquet").exists()
+    model_execution_metadata = json.loads((output_dir / "model_execution_metadata.json").read_text())
+    assert model_execution_metadata["benchmark_version"] == "v4.0"
+    assert model_execution_metadata["models"]["kNN"]["support_side_scoring"] is not None
+    assert model_execution_metadata["models"]["RF"]["support_side_scoring"] is not None
+    assert model_execution_metadata["models"]["kNN-cliff-aware"]["support_side_scoring"] is not None
 
-    standard = pd.read_parquet(output_dir / "episodes_standard.parquet")
-    adversarial = pd.read_parquet(output_dir / "episodes_adversarial.parquet")
+    reproducibility_note = (output_dir / "release_reproducibility.md").read_text()
+    assert "python -m fsmol_cliff.cli build-release" in reproducibility_note
+    assert "src/fsmol_cliff/release.py" in reproducibility_note
+
+    assert (output_dir / "assays" / "CHEMBL_ELIGIBLE" / "pairs_strict.jsonl").exists()
+    assert (output_dir / "assays" / "CHEMBL_ELIGIBLE" / "pairs_relaxed.jsonl").exists()
+    assert (output_dir / "assays" / "CHEMBL_ELIGIBLE" / "anchor_to_hardnegs_strict.json").exists()
+    assert (output_dir / "assays" / "CHEMBL_ELIGIBLE" / "anchor_to_hardnegs_relaxed.json").exists()
+    assert not (output_dir / "fsmol_cliff_all.json").exists()
+    assert not (output_dir / "episodes_standard.parquet").exists()
+    assert not (output_dir / "episodes_adversarial.parquet").exists()
+
+    standard = pd.read_parquet(output_dir / "episodes_standard_strict.parquet")
+    adversarial = pd.read_parquet(output_dir / "episodes_adversarial_strict.parquet")
     assert list(standard["task_id"]) == ["CHEMBL_ELIGIBLE"]
     assert list(adversarial["task_id"]) == ["CHEMBL_ELIGIBLE"]
+    assert set(standard["profile"]) == {"strict"}
+    assert set(adversarial["profile"]) == {"strict"}
+
+    relaxed_standard = pd.read_parquet(output_dir / "episodes_standard_relaxed.parquet")
+    relaxed_adversarial = pd.read_parquet(output_dir / "episodes_adversarial_relaxed.parquet")
+    assert list(relaxed_standard["task_id"]) == ["CHEMBL_ELIGIBLE"]
+    assert list(relaxed_adversarial["task_id"]) == ["CHEMBL_ELIGIBLE"]
+    assert set(relaxed_standard["profile"]) == {"relaxed"}
+    assert set(relaxed_adversarial["profile"]) == {"relaxed"}
+
+    strict_task_summaries = pd.read_parquet(output_dir / "task_summaries_strict.parquet")
+    relaxed_task_summaries = pd.read_parquet(output_dir / "task_summaries_relaxed.parquet")
+    assert set(strict_task_summaries["assay_id"]) == {"CHEMBL_ELIGIBLE", "CHEMBL_SMALL"}
+    assert set(relaxed_task_summaries["assay_id"]) == {"CHEMBL_ELIGIBLE", "CHEMBL_SMALL"}
+    assert strict_task_summaries["anchor_to_hardnegs"].map(type).eq(str).all()
+    assert relaxed_task_summaries["anchor_to_hardnegs"].map(type).eq(str).all()

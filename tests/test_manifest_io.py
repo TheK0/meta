@@ -12,5 +12,7 @@ def test_write_json_persists_sorted_manifest(tmp_path: Path) -> None:
     write_json(target, BenchmarkManifest.default().to_dict())
 
     text = target.read_text()
-    assert '"benchmark_version": "v3.0"' in text
+    assert '"benchmark_version": "v4.0"' in text
+    assert '"profiles"' in text
+    assert '"built_profiles": []' in text
     assert text.endswith("\n")

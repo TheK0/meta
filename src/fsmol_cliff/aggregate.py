@@ -121,17 +121,22 @@ def aggregate_task_result_rows(
     bootstrap_iterations: int = 10_000,
     bootstrap_seed: int = 0,
 ) -> list[dict[str, Any]]:
-    grouped: dict[tuple[str, str], dict[str, list[float]]] = {}
+    grouped: dict[tuple[str, str, str, str], dict[str, list[float]]] = {}
     for row in rows:
         score = row.get("score")
         if not _is_valid_number(score):
             continue
-        split_metric = (str(row["split_type"]), str(row["metric"]))
+        split_metric = (
+            str(row.get("profile", "strict")),
+            str(row.get("result_tier", "final")),
+            str(row["split_type"]),
+            str(row["metric"]),
+        )
         task_scores = grouped.setdefault(split_metric, {})
         task_scores.setdefault(str(row["task_id"]), []).append(float(score))
 
     aggregated = []
-    for (split_type, metric), task_scores in sorted(grouped.items()):
+    for (profile, result_tier, split_type, metric), task_scores in sorted(grouped.items()):
         per_task_means = [sum(scores) / len(scores) for _, scores in sorted(task_scores.items())]
         ci = task_bootstrap_ci(
             per_task_means,
@@ -140,6 +145,8 @@ def aggregate_task_result_rows(
         )
         aggregated.append(
             {
+                "profile": profile,
+                "result_tier": result_tier,
                 "split_type": split_type,
                 "metric": metric,
                 "score": ci["mean"],

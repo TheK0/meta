@@ -1,15 +1,18 @@
 from __future__ import annotations
 
-from fsmol_cliff.constants import DEFAULT_EPISODE_CONFIG, DEFAULT_PROTOCOL_CONSTANTS, DEFAULT_SEEDS
+from fsmol_cliff.constants import DEFAULT_EPISODE_CONFIG, DEFAULT_SEEDS, PROFILE_SPECS
 from fsmol_cliff.models import BenchmarkManifest, PairRecord
 
 
 def test_benchmark_manifest_default_round_trips_to_protocol_dict() -> None:
     manifest = BenchmarkManifest.default().to_dict()
 
-    assert manifest["benchmark_version"] == "v3.0"
+    assert manifest["benchmark_version"] == "v4.0"
     assert manifest["episode_config"] == DEFAULT_EPISODE_CONFIG.to_dict()
-    assert manifest["constants"] == DEFAULT_PROTOCOL_CONSTANTS.to_dict()
+    assert manifest["profiles"] == {
+        name: profile.to_dict() for name, profile in PROFILE_SPECS.items()
+    }
+    assert manifest["built_profiles"] == []
     assert manifest["seeds"] == list(DEFAULT_SEEDS)
     assert manifest["episodes_per_split"] == 400
 

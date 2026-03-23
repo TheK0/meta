@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import warnings
+
 from fsmol_cliff.adapters import (
     diagnose_official_adapter_availability,
     score_official_baseline_episode,
@@ -49,7 +51,9 @@ def test_score_official_baseline_episode_returns_ordered_scores() -> None:
 
 
 def test_diagnose_official_adapter_availability_reports_baseline_ready() -> None:
-    report = diagnose_official_adapter_availability()
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        report = diagnose_official_adapter_availability()
 
     assert report["baseline"]["available"] is True
     assert "callable" in report["baseline"]
@@ -57,3 +61,8 @@ def test_diagnose_official_adapter_availability_reports_baseline_ready() -> None
     assert report["mat"]["available"] is True
     assert report["multitask"]["available"] is True
     assert report["protonet"]["available"] is True
+    assert not [
+        warning for warning in caught
+        if warning.category is DeprecationWarning
+        and "FileType Enum is Deprecated" in str(warning.message)
+    ]

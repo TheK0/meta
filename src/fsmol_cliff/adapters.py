@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import warnings
 
 import numpy as np
 import sklearn.ensemble
@@ -195,13 +196,69 @@ def score_official_baseline_episode(
     }
 
 
+def select_cliff_aware_hard_negatives(
+    *,
+    support_pos_ids: list[str],
+    excluded_ids: set[str],
+    anchor_to_hardnegs: dict[str, list[str]],
+    max_per_anchor: int = 1,
+) -> list[str]:
+    selected: list[str] = []
+    seen = set(excluded_ids)
+    for anchor_id in support_pos_ids:
+        added = 0
+        for neg_id in anchor_to_hardnegs.get(anchor_id, []):
+            if neg_id in seen:
+                continue
+            selected.append(neg_id)
+            seen.add(neg_id)
+            added += 1
+            if added >= max_per_anchor:
+                break
+    return selected
+
+
+def score_cliff_aware_sklearn_episode(
+    *,
+    model_name: str,
+    assay_id: str,
+    records_by_id: dict[str, dict],
+    support_pos_ids: list[str],
+    support_neg_ids: list[str],
+    query_ids: list[str],
+    anchor_to_hardnegs: dict[str, list[str]],
+    use_grid_search: bool = False,
+    model_params: dict | None = None,
+) -> dict[str, float]:
+    extra_negatives = select_cliff_aware_hard_negatives(
+        support_pos_ids=support_pos_ids,
+        excluded_ids=set(support_pos_ids) | set(support_neg_ids) | set(query_ids),
+        anchor_to_hardnegs=anchor_to_hardnegs,
+    )
+    return score_sklearn_episode(
+        model_name=model_name,
+        assay_id=assay_id,
+        records_by_id=records_by_id,
+        support_ids=[*support_pos_ids, *support_neg_ids, *extra_negatives],
+        query_ids=query_ids,
+        use_grid_search=use_grid_search,
+        model_params=model_params,
+    )
+
+
 def diagnose_official_adapter_availability() -> dict[str, dict[str, object]]:
     from .fsmol_bridge import load_callable_from_spec
 
     report: dict[str, dict[str, object]] = {}
     for name, spec in default_adapter_registry().items():
         try:
-            callable_obj = load_callable_from_spec(spec)
+            with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    "ignore",
+                    message="FileType Enum is Deprecated.*",
+                    category=DeprecationWarning,
+                )
+                callable_obj = load_callable_from_spec(spec)
         except Exception as exc:
             report[name] = {
                 "available": False,
@@ -225,5 +282,5 @@ def _record_to_episode_molecule(record: dict) -> SklearnEpisodeMolecule:
         molecule_id=str(record["molecule_id"]),
         smiles=str(record["canonical_isomeric_smiles"]),
         bool_label=bool(record["label"]),
-        fingerprint=np.array(fingerprint),
+        fingerprint=np.asarray(fingerprint, dtype=np.float32),
     )

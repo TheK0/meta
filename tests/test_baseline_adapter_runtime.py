@@ -1,8 +1,14 @@
 from __future__ import annotations
 
+import os
+
 import numpy as np
 
 from fsmol_cliff.adapters import build_sklearn_task_sample, score_sklearn_episode
+
+
+def test_loky_max_cpu_count_is_pinned_for_test_environment() -> None:
+    assert os.environ.get("LOKY_MAX_CPU_COUNT") == "1"
 
 
 def test_build_sklearn_task_sample_exposes_fsmol_like_ratios() -> None:
@@ -43,6 +49,7 @@ def test_build_sklearn_task_sample_exposes_fsmol_like_ratios() -> None:
     assert task_sample.train_pos_label_ratio == 0.5
     assert task_sample.test_pos_label_ratio == 0.5
     assert np.array_equal(task_sample.train_samples[0].get_fingerprint(), np.array([1, 1, 0, 0]))
+    assert task_sample.train_samples[0].get_fingerprint().dtype == np.float32
 
 
 def test_score_sklearn_episode_returns_query_scores_in_manifest_order() -> None:
@@ -119,3 +126,4 @@ def test_build_sklearn_task_sample_computes_fingerprint_from_smiles_when_missing
     )
 
     assert task_sample.train_samples[0].get_fingerprint().shape[0] == 2048
+    assert task_sample.train_samples[0].get_fingerprint().dtype == np.float32

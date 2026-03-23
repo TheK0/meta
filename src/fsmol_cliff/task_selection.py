@@ -1,20 +1,22 @@
 from __future__ import annotations
 
+from .constants import BenchmarkProfile, STRICT_PROFILE
 
-def is_benchmark_eligible(stats: dict) -> bool:
+
+def is_benchmark_eligible(stats: dict, *, profile: BenchmarkProfile = STRICT_PROFILE) -> bool:
     return (
-        stats["num_valid_molecules"] >= 50
-        and stats["num_positive_molecules"] >= 15
-        and stats["num_negative_molecules"] >= 15
-        and stats["num_cliff_pairs"] >= 25
-        and stats["num_anchor_molecules"] >= 10
-        and stats["num_cliff_negatives"] >= 10
-        and stats["num_noncliff_highsim_pairs"] >= 10
+        stats["num_valid_molecules"] >= profile.min_valid_molecules
+        and stats["num_positive_molecules"] >= profile.min_positive_molecules
+        and stats["num_negative_molecules"] >= profile.min_negative_molecules
+        and stats["num_cliff_pairs"] >= profile.min_cliff_pairs
+        and stats["num_anchor_molecules"] >= profile.min_anchor_molecules
+        and stats["num_cliff_negatives"] >= profile.min_cliff_negatives
+        and stats["num_noncliff_highsim_pairs"] >= profile.min_noncliff_pairs
     )
 
 
-def is_adv_eligible(stats: dict) -> bool:
-    return stats["m_avail"] >= 2
+def is_adv_eligible(stats: dict, *, profile: BenchmarkProfile = STRICT_PROFILE) -> bool:
+    return stats["m_avail"] >= profile.min_m_avail
 
 
 def cliff_richness_score(stats: dict) -> float:

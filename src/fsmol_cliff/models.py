@@ -5,10 +5,9 @@ from dataclasses import asdict, dataclass, field
 from .constants import (
     DEFAULT_EPISODE_CONFIG,
     DEFAULT_EPISODES_PER_SPLIT,
-    DEFAULT_PROTOCOL_CONSTANTS,
     DEFAULT_SEEDS,
+    PROFILE_SPECS,
     EpisodeConfig,
-    ProtocolConstants,
 )
 
 
@@ -21,13 +20,14 @@ class BenchmarkManifest:
     episode_config: EpisodeConfig
     seeds: tuple[int, ...]
     episodes_per_split: int
-    constants: ProtocolConstants
+    profiles: dict[str, dict]
+    built_profiles: tuple[str, ...] = field(default_factory=tuple)
 
     @classmethod
     def default(
         cls,
         *,
-        benchmark_version: str = "v3.0",
+        benchmark_version: str = "v4.0",
         fsmol_data_version: str = "<fixed_version>",
         fsmol_episode_generator_commit: str = "<commit_hash>",
         fsmol_metric_commit: str = "<commit_hash>",
@@ -40,7 +40,7 @@ class BenchmarkManifest:
             episode_config=DEFAULT_EPISODE_CONFIG,
             seeds=DEFAULT_SEEDS,
             episodes_per_split=DEFAULT_EPISODES_PER_SPLIT,
-            constants=DEFAULT_PROTOCOL_CONSTANTS,
+            profiles={name: profile.to_dict() for name, profile in PROFILE_SPECS.items()},
         )
 
     def to_dict(self) -> dict:
@@ -52,7 +52,8 @@ class BenchmarkManifest:
             "episode_config": self.episode_config.to_dict(),
             "seeds": list(self.seeds),
             "episodes_per_split": self.episodes_per_split,
-            "constants": self.constants.to_dict(),
+            "profiles": self.profiles,
+            "built_profiles": list(self.built_profiles),
         }
 
 

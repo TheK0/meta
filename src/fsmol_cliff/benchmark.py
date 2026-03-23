@@ -31,7 +31,7 @@ def resolve_external_fsmol_commit(fsmol_checkout_root: Path | None = None) -> st
 
 
 def default_benchmark_manifest(*, fsmol_checkout_root: Path | None = None) -> dict:
-    """Return the protocol defaults for FS-Mol-Cliff v3.0."""
+    """Return the protocol defaults for FS-Mol-Cliff v4.0."""
     commit = resolve_external_fsmol_commit(fsmol_checkout_root)
     return BenchmarkManifest.default(
         fsmol_episode_generator_commit=commit or "<commit_hash>",

@@ -86,10 +86,19 @@ def evaluate_episode_manifest(
 
 
 def summarize_task_metric_rows(episode_results: list[dict]) -> list[dict]:
-    grouped: dict[tuple[str, int, str, str], list[dict]] = defaultdict(list)
+    grouped: dict[tuple[str, str, str, int, str, str], list[dict]] = defaultdict(list)
     for result in episode_results:
         for metric, value in result["metrics"].items():
-            grouped[(result["task_id"], result["seed"], result["split_type"], metric)].append(
+            grouped[
+                (
+                    str(result.get("profile", "strict")),
+                    str(result.get("result_tier", "final")),
+                    result["task_id"],
+                    result["seed"],
+                    result["split_type"],
+                    metric,
+                )
+            ].append(
                 {
                     "value": value,
                     "pair_count": result["pair_counts"].get(metric, 0),
@@ -98,12 +107,14 @@ def summarize_task_metric_rows(episode_results: list[dict]) -> list[dict]:
             )
 
     rows = []
-    for (task_id, seed, split_type, metric), entries in grouped.items():
+    for (profile, result_tier, task_id, seed, split_type, metric), entries in grouped.items():
         summary = task_mean(entry["value"] for entry in entries)
         valid_pair_counts = [entry["pair_count"] for entry in entries if entry["value"] is not None]
         episode_context = _summarize_episode_context(entry["episode_context"] for entry in entries)
         rows.append(
             {
+                "profile": profile,
+                "result_tier": result_tier,
                 "task_id": task_id,
                 "seed": seed,
                 "split_type": split_type,
@@ -118,7 +129,17 @@ def summarize_task_metric_rows(episode_results: list[dict]) -> list[dict]:
                 **episode_context,
             }
         )
-    return sorted(rows, key=lambda row: (row["task_id"], row["seed"], row["split_type"], row["metric"]))
+    return sorted(
+        rows,
+        key=lambda row: (
+            row["profile"],
+            row["result_tier"],
+            row["task_id"],
+            row["seed"],
+            row["split_type"],
+            row["metric"],
+        ),
+    )
 
 
 def fraction_positive_for_query_ids(

@@ -19,7 +19,7 @@ _RAW_SMILES_KEYS = ("smiles", "SMILES", "Smiles")
 _RELATION_KEYS = ("relation", "Relation")
 _QUALIFIER_KEYS = ("censoring_qualifier", "CensoringQualifier", "qualifier", "Qualifier")
 _R_KEYS = ("r", "LogRegressionProperty", "log_regression_property")
-_LABEL_KEYS = ("label", "Label", "Y", "y")
+_LABEL_KEYS = ("label", "Label", "Y", "y", "Property")
 _MOLECULE_ID_KEYS = ("molecule_id", "Molecule_ID", "compound_id", "Compound_ID", "id", "mol_id")
 _SCAFFOLD_KEYS = ("scaffold", "murcko_scaffold", "scaffold_smiles")
 
@@ -272,7 +272,7 @@ def _is_precise_measurement(record: Mapping[str, Any]) -> bool:
 def _resolve_canonical_smiles(record: Mapping[str, Any]) -> str | None:
     canonical = _coerce_optional_text(_first_present(record, _CANONICAL_SMILES_KEYS))
     if canonical is not None:
-        return canonical
+        return canonicalize_isomeric_smiles(canonical)
     raw_smiles = _coerce_optional_text(_first_present(record, _RAW_SMILES_KEYS))
     return canonicalize_isomeric_smiles(raw_smiles)
 
@@ -357,6 +357,12 @@ def _coerce_label(value: Any) -> int | None:
         return 0
     if text in {"1", "active", "true"}:
         return 1
+    try:
+        numeric = float(text)
+    except ValueError:
+        return None
+    if numeric in (0.0, 1.0):
+        return int(numeric)
     return None
 
 

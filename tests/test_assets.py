@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import math
 
+import numpy as np
 import pytest
 
 from fsmol_cliff.assets import filter_assay_records, mine_assay_pairs
-from fsmol_cliff.chem import canonicalize_isomeric_smiles, rdkit_is_available
+from fsmol_cliff.chem import canonicalize_isomeric_smiles, morgan_fingerprint_array, rdkit_is_available
 
 
 def test_filter_assay_records_enforces_precision_and_duplicate_collapse() -> None:
@@ -99,6 +100,31 @@ def test_filter_assay_records_enforces_precision_and_duplicate_collapse() -> Non
             "source_ids": ["keep-a", "keep-b"],
         }
     ]
+
+
+def test_filter_assay_records_accepts_fsmol_property_field() -> None:
+    records = [
+        {
+            "Assay_ID": "CHEMBL1",
+            "compound_id": "mol-a",
+            "Property": "1.0",
+            "Relation": "=",
+            "LogRegressionProperty": "7.5",
+            "SMILES": "CCO",
+        },
+        {
+            "Assay_ID": "CHEMBL1",
+            "compound_id": "mol-b",
+            "Property": "0.0",
+            "Relation": "=",
+            "LogRegressionProperty": "6.1",
+            "SMILES": "CCN",
+        },
+    ]
+
+    filtered = filter_assay_records("CHEMBL1", records)
+
+    assert [record["label"] for record in filtered] == [1, 0]
 
 
 def test_mine_assay_pairs_derives_protocol_subsets_and_diagnostics() -> None:
@@ -199,3 +225,34 @@ def test_mine_assay_pairs_builds_stable_hard_negative_pools() -> None:
 @pytest.mark.skipif(not rdkit_is_available(), reason="rdkit is not installed")
 def test_canonicalize_isomeric_smiles_returns_rdkit_canonical_form() -> None:
     assert canonicalize_isomeric_smiles("OC[C@H](F)Cl") == "OC[C@H](F)Cl"
+
+
+@pytest.mark.skipif(not rdkit_is_available(), reason="rdkit is not installed")
+def test_canonicalize_isomeric_smiles_returns_none_for_invalid_smiles() -> None:
+    assert canonicalize_isomeric_smiles("P01") is None
+
+
+@pytest.mark.skipif(not rdkit_is_available(), reason="rdkit is not installed")
+def test_filter_assay_records_revalidates_provided_canonical_smiles() -> None:
+    records = [
+        {
+            "Assay_ID": "CHEMBL1",
+            "compound_id": "bad-canonical",
+            "Y": 1,
+            "Relation": "=",
+            "LogRegressionProperty": 7.0,
+            "CanonicalIsomericSmiles": "P01",
+        }
+    ]
+
+    assert filter_assay_records("CHEMBL1", records) == []
+
+
+@pytest.mark.skipif(not rdkit_is_available(), reason="rdkit is not installed")
+def test_morgan_fingerprint_array_distinguishes_chiral_enantiomers() -> None:
+    left = morgan_fingerprint_array("F[C@H](Cl)Br")
+    right = morgan_fingerprint_array("F[C@@H](Cl)Br")
+
+    assert left is not None
+    assert right is not None
+    assert not np.array_equal(left, right)

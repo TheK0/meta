@@ -15,10 +15,11 @@ def rdkit_is_available() -> bool:
 
 @lru_cache(maxsize=1)
 def _load_rdkit():
-    from rdkit import Chem, DataStructs
+    from rdkit import Chem, DataStructs, RDLogger
     from rdkit.Chem import AllChem
     from rdkit.Chem.Scaffolds import MurckoScaffold
 
+    RDLogger.DisableLog("rdApp.*")
     return Chem, DataStructs, AllChem, MurckoScaffold
 
 
@@ -33,7 +34,7 @@ def canonicalize_isomeric_smiles(smiles: str | None) -> str | None:
     chem, _, _, _ = _load_rdkit()
     molecule = chem.MolFromSmiles(value)
     if molecule is None:
-        return value
+        return None
     return str(chem.MolToSmiles(molecule, canonical=True, isomericSmiles=True))
 
 
@@ -86,7 +87,13 @@ def _morgan_fingerprint(canonical_smiles: str):
     molecule = chem.MolFromSmiles(canonical_smiles)
     if molecule is None:
         return None
-    return all_chem.GetMorganFingerprintAsBitVect(molecule, radius=2, nBits=2048)
+    return all_chem.GetMorganFingerprintAsBitVect(
+        molecule,
+        radius=2,
+        nBits=2048,
+        useChirality=True,
+        useBondTypes=True,
+    )
 
 
 def _normalize_smiles(smiles: str | None) -> str | None:

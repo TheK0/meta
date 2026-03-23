@@ -1,0 +1,576 @@
+% Latest publicly available official NeurIPS template as of 2026-03-23.
+% A public NeurIPS 2026 style file was not yet available on neurips.cc,
+% so this manuscript is aligned to the official NeurIPS 2025 template.
+\documentclass{article}
+
+\PassOptionsToPackage{numbers,compress}{natbib}
+\usepackage[preprint]{neurips_2025}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{hyperref}
+\usepackage{url}
+\usepackage{booktabs}
+\usepackage{amsfonts}
+\usepackage{nicefrac}
+\usepackage{microtype}
+\usepackage{xcolor}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+
+\title{Activity Cliffs as Probes of Decision-Layer Collapse in Few-Shot Molecular Classification}
+\author{Anonymous Authors}
+\date{}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+Average few-shot metrics can obscure failures in chemically critical local regions. In few-shot molecular
+classification, a model may preserve relative ordering on hard pairs while still failing to form a usable decision
+boundary in the presence of activity cliffs. We study this failure mode through \emph{CliffBench}, an activity-
+cliff diagnostic benchmark and evaluation protocol instantiated on an assay-local few-shot molecular classification
+substrate. CliffBench separates ranking-layer and decision-layer behavior through complementary metric families and
+combines standard with adversarial episodic evaluation. On the rebuilt release, covering $6$ relaxed-profile tasks
+and $2$ strict-profile tasks, we find that average-metric misalignment with cliff robustness is a supported trend,
+while ranking--decision decoupling is strong enough to support a benchmark-level decision-layer collapse
+interpretation. Among the full-strength baselines, ProtoNet is the strongest balanced model, whereas Random Forest
+provides the clearest ranking-competent but decision-collapsed counterexample. A simple cliff-aware intervention
+yields modest but consistent local gains over a vanilla $k$NN baseline, although not yet strong enough for a full
+benchmark-level intervention claim. These results suggest that future progress in few-shot molecular learning will
+require not only stronger representations, but also better local boundary formation and calibration in
+cliff-sensitive regions.
+\end{abstract}
+
+\section{Introduction}
+
+Machine learning is becoming an increasingly important component of molecular discovery, where predictive models
+are used to prioritize compounds, guide hit expansion, and support lead optimization. In practice, however, many
+molecular prediction tasks remain data-poor: each assay may provide only a small number of labeled examples, and
+acquiring additional measurements is often expensive and slow. Few-shot learning (FSL) is therefore an appealing
+paradigm for molecular property prediction, because it aims to transfer knowledge across tasks and adapt to a new
+assay from only a small support set \cite{fsmol,protonet,maml}.
+
+Strong average few-shot performance, however, does not by itself imply reliable decision making in the most
+chemically important regions of structure--activity space. Medicinal chemistry is shaped by a tension between the
+broad usefulness of the similarity principle and the sharp discontinuities that violate it. In many regions of a
+structure--activity relationship (SAR) landscape, structurally similar molecules exhibit similar activity. In
+\emph{activity cliffs}, by contrast, small structural changes can induce disproportionately large shifts in
+potency or label \cite{activity_cliffs_review,moleculeace}. These cases are not peripheral curiosities. They are
+precisely the regions in which a model must distinguish superficial similarity from decision-relevant local
+structure.
+
+This distinction becomes especially important in few-shot molecular classification. In a sparse episodic setting,
+a model may learn enough relational structure to rank hard pairs correctly while still failing to place a usable
+active/inactive boundary. We use the term \emph{decision-layer collapse} to describe this diagnostic pattern:
+ranking behavior remains partly intact, but absolute decision behavior becomes fragile in cliff-heavy regions. In
+other words, a model may still assign a higher score to the active molecule in a hard pair, yet fail to separate
+the pair with a stable classification boundary. For downstream screening and prioritization, such behavior is
+materially different from robust decision making.
+
+Existing benchmarks do not make this failure mode easy to see. Standard few-shot molecular benchmarks emphasize
+broad cross-task generalization and aggregate episode-level metrics \cite{fsmol}. Activity-cliff benchmarks, in
+contrast, expose localized SAR discontinuities but are typically framed in conventional supervised settings rather
+than assay-local episodic few-shot evaluation \cite{moleculeace}. As a result, the current evaluation landscape
+leaves an important gap: we lack a benchmark substrate that directly tests whether few-shot molecular classifiers
+can make stable decisions in the presence of high-similarity discordant pairs.
+
+To address this gap, we introduce \emph{CliffBench}, an activity-cliff diagnostic benchmark and evaluation
+protocol instantiated on an assay-local few-shot molecular classification substrate derived from FS-Mol. Rather
+than treating cliffs as rare corner cases, CliffBench uses them as targeted probes of model reliability. The
+protocol separates ranking-layer and decision-layer behavior through complementary metric families, combines
+standard and adversarial episodic evaluation, and makes it possible to ask whether apparent few-shot competence
+survives in the presence of chemically meaningful local discontinuities.
+
+\subsection{Contributions}
+
+This paper makes four contributions.
+
+First, we motivate activity cliffs as high-value probes for evaluating few-shot molecular classifiers. Rather than
+asking only whether a model performs well on average, we ask whether it remains reliable in local regions where
+small structural changes have large decision consequences.
+
+Second, we introduce \emph{CliffBench}, a benchmark and evaluation protocol that targets high-similarity
+discordant and cliff-heavy regions in an assay-local few-shot setting. The framework combines standard and
+adversarial episodes and explicitly separates ranking-layer from decision-layer evaluation.
+
+Third, we show that average few-shot metrics and cliff-specific behavior do not move together cleanly. This
+supports the view that global episode-level performance can mask localized failures, even when models look
+competitive under standard aggregate summaries.
+
+Fourth, we provide benchmark-level evidence consistent with a decision-layer collapse interpretation: some models
+retain substantial hard-pair ranking ability while remaining weak on cliff decision and collapse-sensitive
+metrics. We further show that a simple cliff-aware intervention yields modest but consistent local robustness
+gains over a vanilla baseline, suggesting that localized supervision can improve cliff-side behavior even when the
+overall effect remains limited.
+
+More broadly, our goal is not to replace standard few-shot benchmarks, but to complement them with a diagnostic
+view that is closer to the failure modes medicinal chemists care about. If few-shot molecular models are to be
+useful in realistic discovery settings, they must do more than preserve coarse similarity-based ordering. They
+must also remain reliable where small structural perturbations carry large decision consequences.
+
+\section{Related Work}
+
+\subsection{Few-Shot Molecular Property Prediction}
+
+Few-shot learning has become a prominent strategy for molecular property prediction under assay-level data
+scarcity. Existing work has explored metric-based, optimization-based, and transfer-based methods for adapting to
+new molecular tasks from limited support examples \cite{fsmol,protonet,maml}. Benchmarks such
+as FS-Mol were an important step forward because they standardized episodic evaluation across a large number of
+assays and enabled systematic comparison among few-shot model families \cite{fsmol}. However, these benchmarks
+were primarily designed to evaluate cross-task generalization at scale, rather than localized robustness in
+chemically discontinuous regions.
+
+\subsection{Activity Cliffs and SAR Discontinuities}
+
+Activity cliffs are a longstanding topic in medicinal chemistry because they capture sharp violations of smooth
+SAR assumptions: highly similar molecules can exhibit markedly different biological activity
+\cite{activity_cliffs_review,moleculeace}. Recent benchmark efforts, most notably MoleculeACE, showed that overall
+molecular prediction quality and cliff-specific performance can diverge substantially, and that models with strong
+global metrics may still perform poorly on cliff subsets \cite{moleculeace}. This line of work established the
+importance of cliff-aware evaluation, but it has largely focused on standard supervised learning rather than
+assay-local few-shot episodes. Our work builds on this insight by bringing cliff-centered evaluation into a few-
+shot setting.
+
+\subsection{Shortcut Learning, Calibration, and Boundary Fragility}
+
+A growing literature argues that molecular learning systems can rely on shortcut-like signals, including global
+similarity or scaffold-level regularities, instead of learning the localized determinants that drive true
+functional differences \cite{shortcut_learning,molecular_shortcuts}. This concern is particularly relevant for
+activity cliffs, where scaffold-level similarity can be high while decision-relevant local changes remain subtle.
+More broadly, recent work in machine learning and molecular foundation models has highlighted objective--metric
+misalignment and reliability limits: models can optimize ranking-oriented or contrastive objectives while remaining
+poorly calibrated for absolute decisions \cite{metric_misalignment,uncertainty_mol}. Our work is aligned with this
+perspective, but focuses on an assay-local few-shot regime in which sparse support sets can make decision
+boundaries especially fragile.
+
+\subsection{Positioning of This Work}
+
+Our setting sits at the intersection of these three lines of research. Relative to standard few-shot molecular
+benchmarks, we focus on localized high-similarity discordant regions rather than only global episodic averages.
+Relative to activity-cliff benchmarks, we operate in a true few-shot episodic regime. Relative to shortcut-
+learning and calibration analyses, we contribute a benchmark-level diagnostic protocol rather than a purely
+mechanistic claim. The result is a framework for evaluating whether a few-shot molecular classifier can do more
+than rank broadly plausible candidates: it can be tested on whether it maintains a usable decision boundary where
+SAR is most discontinuous.
+
+\section{Problem Setting}
+
+\subsection{Assay-Local Few-Shot Molecular Classification}
+
+We consider assay-level binary few-shot molecular classification. For an assay $t$, let $V_t$ denote the set of
+valid molecules, with binary labels $y_i \in \{0,1\}$ and assay-local continuous activity values $r_i \in
+\mathbb{R}$ for each molecule $m_i \in V_t$. We write $V_t^+$ and $V_t^-$ for the active and inactive subsets,
+respectively.
+
+Evaluation is episodic. In each episode, a model receives a small labeled support set and must predict labels or
+scores for a query set from the same assay. The few-shot goal is not merely to rank molecules coarsely by
+plausibility, but to transfer across assays and form a useful decision rule from limited support examples.
+
+This setting is particularly challenging in regions where structural similarity is high but label discordance
+persists. Such cases are common in medicinal chemistry and are especially informative for evaluating whether a
+model has learned a decision-relevant representation rather than a broad similarity heuristic.
+
+\subsection{High-Similarity Discordant Pairs, Activity Cliffs, and Controls}
+
+For each assay, we compute molecular similarity using Tanimoto similarity over Morgan fingerprints. Let
+$\mathrm{Sim}(m_i,m_j)$ denote the similarity between molecules $m_i$ and $m_j$. Following an assay-local
+definition, we first identify the set of high-similarity discordant pairs
+\[
+H_t^{\mathrm{disc}} = \{(i,j)\mid i \in V_t^+,\, j \in V_t^-,\, \mathrm{Sim}(m_i,m_j) \ge \tau \}.
+\]
+
+We then partition this set into cliff and non-cliff controls using the assay-local activity gap:
+\[
+C_t = \{(i,j) \in H_t^{\mathrm{disc}} \mid |r_i-r_j| \ge \delta \},
+\]
+\[
+D_t = \{(i,j) \in H_t^{\mathrm{disc}} \mid |r_i-r_j| < \delta \}.
+\]
+
+Here, $C_t$ contains activity-cliff pairs, while $D_t$ serves as a high-similarity non-cliff control set.
+Throughout the benchmark, pair direction is fixed as active $\rightarrow$ inactive. We also define same-scaffold
+subsets by restricting to pairs that share the same non-empty Bemis--Murcko scaffold:
+\[
+C_t^{\mathrm{scaf}} \subseteq C_t, \qquad D_t^{\mathrm{scaf}} \subseteq D_t.
+\]
+
+This construction separates three related but distinct notions: broad assay-level classification, hard high-
+similarity discordant ranking, and true cliff-side decision making.
+
+\subsection{Diagnostic View: Ranking Layer vs. Decision Layer}
+
+Let a model output an active score $s(x) \in \mathbb{R}$ for molecule $x$. For pairwise ranking, we define the
+pairwise success function
+\[
+\phi(i,j)=
+\begin{cases}
+1, & s(m_i) > s(m_j),\\
+0.5, & s(m_i) = s(m_j),\\
+0, & s(m_i) < s(m_j).
+\end{cases}
+\]
+Because pair direction is fixed as active $\rightarrow$ inactive, higher values indicate better ranking of the
+active molecule above the inactive one.
+
+We use this to define ranking-layer metrics. For query-side cliff pairs,
+\[
+\mathrm{Q\mbox{-}PSR} = \frac{1}{|Q_t^{\mathrm{cliff}}|} \sum_{(i,j)\in Q_t^{\mathrm{cliff}}} \phi(i,j),
+\]
+where $Q_t^{\mathrm{cliff}}$ denotes the set of cliff pairs induced by the query set in an episode. For
+adversarially injected support-query cliff pairs, we analogously compute $\mathrm{SQ\mbox{-}PSR}$. Same-scaffold
+variants restrict the averaging set to pairs in $C_t^{\mathrm{scaf}}$.
+
+To evaluate decision behavior, we convert scores to discrete predictions $\hat{y}_i \in \{0,1\}$ using the model's
+fixed reporting rule. We then compute cliff-side balanced accuracy on cliff-associated query molecules:
+\[
+\mathrm{C\mbox{-}BAcc} = \frac{1}{2}(\mathrm{TPR}_{\mathrm{cliff}} + \mathrm{TNR}_{\mathrm{cliff}}).
+\]
+
+We further define the success-but-collapse rate through the collapse statistic
+\[
+\mathrm{SCR} = \frac{1}{|P_t|} \sum_{(i,j)\in P_t} \mathbb{I}\!\left[\hat{y}_i=\hat{y}_j\right],
+\]
+where $P_t$ denotes the relevant high-similarity discordant pair set for the evaluation slice. Intuitively,
+$\mathrm{SCR}$ measures how often a model assigns the same discrete class to both molecules in a discordant pair;
+lower values are better. Same-scaffold collapse is measured by $\mathrm{SS\mbox{-}SCR}$.
+
+These metrics separate two behaviors that are often conflated in standard evaluation. A model may retain
+substantial ranking competence on hard pairs while still failing to establish a usable classification boundary. We
+refer to this ranking--decision decoupling as \emph{decision-layer collapse}.
+
+\subsection{Research Questions}
+
+Our evaluation is organized around three questions.
+
+\paragraph{H1: Metric Misalignment.}
+Do average few-shot metrics and cliff-specific metrics move together cleanly across models, or can strong average
+performance mask weak cliff robustness?
+
+\paragraph{H2: Decision-Layer Collapse.}
+Can a model preserve ranking behavior on hard high-similarity pairs while remaining weak on cliff decision and
+collapse-sensitive metrics?
+
+\paragraph{H3: Cliff-Aware Mitigation.}
+Does introducing cliff-aware supervision or episode construction improve cliff-side behavior and reduce collapse
+without substantially harming non-cliff controls?
+
+\section{CliffBench: Benchmark Construction and Evaluation Protocol}
+
+\subsection{Assay-Local Benchmark Substrate}
+
+We instantiate \emph{CliffBench} on an assay-local few-shot molecular classification substrate derived from FS-Mol
+\cite{fsmol}. All preprocessing, pair mining, episode construction, and metric computation are
+performed within an assay. We do not mix continuous activities, pair definitions, or scaffold logic across assays.
+
+A molecule is retained only if it passes a fixed legality filter, including finite assay-local activity, precise
+relation type, valid RDKit parsing and sanitization, and canonical isomeric identity handling. Duplicate records
+are resolved assay-locally using deterministic rules. This design ensures that cliff and non-cliff events remain
+chemically meaningful within each task rather than becoming artifacts of cross-assay aggregation.
+
+\subsection{Profiles and Task Eligibility}
+
+CliffBench uses two benchmark profiles. The \emph{relaxed} profile is the primary benchmark, while the
+\emph{strict} profile is retained as a sharper mechanism stress test. In the rebuilt release, the profiles use
+\[
+(\tau,\delta) = (0.80,1.0) \quad \text{for relaxed},
+\]
+\[
+(\tau,\delta) = (0.85,1.0) \quad \text{for strict},
+\]
+with common minimum requirements on cliff and non-cliff support.
+
+An assay is benchmark-eligible only if it satisfies minimum constraints on valid molecule count, class balance,
+high-similarity discordant support, cliff support, non-cliff control support, and anchor-side coverage.
+Adversarial eligibility further requires sufficient support-query matching capacity, quantified through the
+maximum matching size $M_{\mathrm{avail}}(t)$ between active anchors and cliff negatives.
+
+This dual-profile design serves two complementary purposes. The relaxed profile increases assay coverage and
+functions as the main comparison substrate. The strict profile concentrates the cliff-heavy regime and is better
+suited for mechanism inspection and stress testing.
+
+\subsection{Pair Mining and Hard Negative Construction}
+
+For each assay, we mine high-similarity discordant pairs from active--inactive molecule pairs satisfying the
+profile-specific similarity threshold. Activity cliffs and non-cliff controls are then separated by the assay-
+local activity gap threshold. We additionally identify same-scaffold subsets using Bemis--Murcko scaffolds.
+
+To support adversarial episode construction, we build an anchor-specific hard negative pool. For each active
+anchor, candidate inactive partners are ranked by decreasing similarity, then by decreasing activity gap, with
+deterministic tie-breaking. This provides a consistent source of chemically close but label-opposed negatives for
+adversarial injection.
+
+\subsection{Standard and Adversarial Episodes}
+
+CliffBench uses two episode types.
+
+\paragraph{Standard episodes.}
+Standard episodes follow the frozen few-shot configuration of the underlying benchmark substrate. They provide the
+baseline estimate of assay-level few-shot behavior under a conventional episodic split.
+
+\paragraph{Adversarial episodes.}
+Adversarial episodes explicitly inject support-query cliff structure. For each assay, we construct a bipartite
+graph between active anchors and cliff negatives, and compute the maximum matching size $M_{\mathrm{avail}}(t)$.
+The injection count is then
+\[
+m = \min\!\left(\left\lfloor 0.5|Q^-| \right\rfloor,\ |S^+|,\ M_{\mathrm{avail}}(t)\right),
+\]
+where $Q^-$ denotes the negative query set and $S^+$ the positive support set. If $m<2$, the assay does not
+contribute to adversarial metrics.
+
+This design makes adversarial evaluation targeted rather than random. Instead of hoping that cliff events appear
+naturally in the query set, CliffBench guarantees that the model is tested on structurally similar but decision-
+critical positive--negative relationships.
+
+\subsection{Metric Families and Reporting}
+
+CliffBench reports three complementary metric families.
+
+\paragraph{Ranking-layer metrics.}
+These include $\mathrm{Q\mbox{-}PSR}$, $\mathrm{SQ\mbox{-}PSR}$, and their same-scaffold counterparts. They
+measure whether the model places the active molecule above the inactive molecule in hard pair comparisons.
+
+\paragraph{Decision-layer metrics.}
+These include $\mathrm{C\mbox{-}BAcc}$, $\mathrm{NC\mbox{-}BAcc}$, $\mathrm{SCR}$, and $\mathrm{SS\mbox{-}SCR}$.
+They measure whether the model forms a usable boundary on cliff-side molecules and whether discordant pairs
+collapse to identical discrete predictions.
+
+\paragraph{Average metrics.}
+To preserve comparability with standard few-shot reporting, we also report average precision and $\Delta$AUPRC,
+where $\Delta$AUPRC subtracts the positive-class base rate in the query set.
+
+Together, these metrics expose a failure mode that standard aggregate reporting can hide. A model can look
+competitive under average metrics or even under pairwise ranking metrics, while remaining weak on cliff-specific
+decision metrics. This separation is central to our diagnostic view.
+
+\section{Experimental Setup}
+
+\subsection{Benchmark Coverage}
+
+We evaluate on the rebuilt CliffBench release. Across $157$ raw test assays considered during rebuilding, the
+current release contains $6$ relaxed-eligible assays and $2$ strict-eligible assays.
+Following the benchmark positioning, we use \emph{relaxed} as the primary comparison substrate and \emph{strict}
+as supporting mechanism context.
+
+This distinction matters for claim strength. The relaxed profile provides the most defensible basis for benchmark-
+level comparisons, while the strict profile is best interpreted as a stress-test slice with lower coverage.
+
+\subsection{Model Suite}
+
+Our primary full-strength comparison set consists of four model families:
+\begin{itemize}
+    \item \textbf{kNN}: a local metric baseline;
+    \item \textbf{RF}: a strong classical supervised baseline;
+    \item \textbf{ProtoNet}: a metric-based few-shot baseline with support-side scoring;
+    \item \textbf{kNN-cliff-aware}: a localized cliff-aware intervention baseline.
+\end{itemize}
+
+We also retain \textbf{MAML} as exploratory compatibility context. However, in the current rebuilt release its
+rows are generated through a legacy compatibility path with only $3$ episodes per task/seed/split, rather than the
+full evaluation budget. We therefore do not treat MAML as part of the strongest final claim substrate.
+
+\subsection{Episode Configuration}
+
+Unless otherwise noted, episodes use a $2$-way few-shot setting with $16$ support molecules per class and $16$
+query molecules per class. For each task and seed, we evaluate
+\[
+400 \text{ standard episodes} + 400 \text{ adversarial episodes}.
+\]
+We use seeds $0,\dots,4$ throughout the main evaluation.
+
+This configuration is intentionally large enough to stabilize episode-level summaries while remaining compatible
+with assay-local coverage constraints in the rebuilt release.
+
+\subsection{Prediction Rules and Support-Side Scoring}
+
+Each model outputs an active score $s(x)$. Ranking-layer metrics operate directly on these continuous scores.
+Decision-layer metrics require discrete predictions derived from the model's fixed reporting rule. For methods
+that report support-query ranking metrics, we require an explicit support-side scoring mechanism, such as
+prototype-based support scoring or post-adaptation classifier outputs, so that support-query comparisons are
+operationally well-defined.
+
+This is important because a model should not be credited with support-query ranking performance if it only
+produces query-side scores.
+
+\subsection{Aggregation and Statistical Comparison}
+
+Evaluation proceeds in two stages. First, within each task, seed, split, and metric, we average over valid
+episodes only. For each metric we also report coverage, the number of valid episodes, and the mean number of valid
+pairs per valid episode. Second, we macro-average task-level summaries across tasks and report $95\%$ confidence
+intervals using task-level bootstrap resampling with $10{,}000$ iterations.
+
+For model comparisons, we use task-level paired bootstrap deltas. This design keeps the comparison aligned to
+assay-level variation rather than inflating confidence through raw episode counts. Because assay coverage is still
+limited in the rebuilt release, we interpret confidence intervals conservatively and distinguish between
+\emph{formal claim}, \emph{supported trend}, and \emph{exploratory} evidence tiers.
+
+\subsection{Scope of Main Claims}
+
+Our strongest claim wording is based on the relaxed-profile full-strength model set: \texttt{kNN}, \texttt{RF},
+\texttt{ProtoNet}, and \texttt{kNN-cliff-aware}. Under this scope, the current release supports a formal
+benchmark-level interpretation of decision-layer collapse, while the metric-misalignment and intervention stories
+are better stated as supported trends rather than final claims.
+
+We adopt this claim discipline throughout the paper. The goal is to characterize the current evidence boundary
+clearly, rather than to overstate what can be concluded from a rebuilt benchmark with limited assay coverage.
+
+\section{Results}
+
+Unless otherwise noted, all quantitative results in this section refer to the relaxed-profile full-strength model
+set: \texttt{kNN}, \texttt{RF}, \texttt{ProtoNet}, and \texttt{kNN-cliff-aware}. We use this substrate for main-
+text interpretation because it is the current strongest basis for benchmark-level comparison.
+
+\subsection{Aggregate Snapshot}
+
+Table~\ref{tab:relaxed-main} summarizes the main relaxed-profile aggregate metrics. Two patterns are immediately
+visible. First, ProtoNet is the strongest balanced full-episode baseline across both the standard and adversarial
+slices. Second, RF is the clearest example of a model that remains highly competitive at hard-pair ranking while
+still looking fragile on cliff-side decision behavior.
+
+\begin{table}[t]
+\centering
+\caption{Aggregate relaxed-profile results for the full-strength model set. Higher is better for
+$\Delta$AUPRC, C-BAcc, Q-PSR, and SQ-PSR; lower is better for SCR.}
+\label{tab:relaxed-main}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{lcccccccc}
+\toprule
+Model & std $\Delta$AUPRC & std C-BAcc & std Q-PSR & std SCR & adv $\Delta$AUPRC & adv C-BAcc & adv SQ-PSR & adv SCR \\
+\midrule
+\texttt{kNN} & 0.105021 & 0.508397 & 0.513157 & 0.925098 & 0.015338 & 0.474543 & 0.528708 & 0.939580 \\
+\texttt{RF} & 0.187063 & 0.514127 & 0.591827 & 0.899767 & -0.009912 & 0.510866 & 0.910745 & 0.933810 \\
+\texttt{ProtoNet} & 0.203395 & 0.544073 & 0.643762 & 0.804123 & 0.057186 & 0.547411 & 0.778281 & 0.840986 \\
+\texttt{kNN-cliff-aware} & 0.109866 & 0.514785 & 0.518979 & 0.897206 & 0.030065 & 0.489892 & 0.539401 & 0.918337 \\
+\bottomrule
+\end{tabular}%
+}
+\end{table}
+
+\subsection{Average Metrics Do Not Cleanly Track Cliff Robustness}
+
+Our first question is whether standard few-shot averages provide a faithful ordering of cliff robustness. The
+answer is only partially yes. ProtoNet is the strongest model both on average-oriented metrics and on several
+cliff-sensitive metrics, but the broader model ordering does not collapse into a single one-dimensional ranking. In
+particular, the transition from \texttt{kNN} to \texttt{RF} shows the clearest masking pattern: on the standard
+split, paired comparisons show gains in $\Delta$AUPRC and Q-PSR, but the direct gain in cliff-side balanced
+accuracy is small and its interval does not cleanly separate from zero.
+
+This is why we treat the metric-misalignment story as a supported trend rather than a final claim. The signal is
+real, but the current rebuilt release still has only six relaxed-profile tasks, and the cliff-versus-control gap
+is not directionally stable enough across the full model set to justify stronger wording. In other words, average
+few-shot metrics can mask localized cliff failures, but the present artifact supports this as a credible trend
+rather than a fully settled benchmark-level conclusion.
+
+\subsection{Activity Cliffs Expose Ranking--Decision Decoupling}
+
+The strongest result in the rebuilt release is the ranking--decision split itself. RF provides the sharpest
+counterexample. On the adversarial split, it reaches $\mathrm{SQ\mbox{-}PSR}=0.910745$, indicating extremely
+strong support-query hard-pair ranking, yet its cliff-side decision behavior remains weak, with
+$\mathrm{C\mbox{-}BAcc}=0.510866$ and $\mathrm{SCR}=0.933810$. This is precisely the pattern we mean by
+decision-layer collapse: the model can often order hard pairs correctly while still failing to establish a usable
+decision boundary.
+
+This is not an outlier-driven story. At the task level, RF beats \texttt{kNN} on adversarial SQ-PSR in all
+$6/6$ relaxed tasks, but beats it on adversarial C-BAcc in only $3/6$ tasks. The ranking signal is broad and
+stable; the decision signal is not. ProtoNet shows the same split in a milder form, but remains substantially more
+balanced than RF. It is stronger than \texttt{kNN} on adversarial C-BAcc in $6/6$ tasks and on adversarial SCR in
+$5/6$ tasks, which is why it is best interpreted as the strongest balanced baseline rather than as a model that
+eliminates collapse entirely.
+
+Same-scaffold results reinforce this picture. Ranking remains harder when evaluation is restricted to the same-
+scaffold slice, with RF dropping from adversarial SQ-PSR $0.910745$ to adversarial SS-SQ-PSR $0.897061$, and
+ProtoNet dropping from $0.778281$ to $0.763198$. This same-scaffold brittleness is consistent with the broader
+interpretation that localized cliff decisions remain difficult even when global similarity signals are strong.
+
+\subsection{Cliff-Aware Intervention Yields Modest but Consistent Local Gains}
+
+Our third question asks whether a localized cliff-aware intervention can improve cliff-side behavior without
+substantially harming non-cliff controls. The answer is encouraging but modest. Relative to vanilla \texttt{kNN},
+\texttt{kNN-cliff-aware} improves standard C-BAcc from $0.508397$ to $0.514785$ and reduces standard SCR from
+$0.925098$ to $0.897206$. In paired comparisons, the standard C-BAcc gain is $+0.006388$ with a $95\%$ interval
+$[0.002617, 0.010193]$, while standard SCR improves by $-0.027892$ with interval
+$[-0.056174, -0.002390]$.
+
+The intervention also helps under adversarial evaluation, although again with limited magnitude. Raw adversarial
+C-BAcc rises from $0.474543$ to $0.489892$, and adversarial SCR drops from $0.939580$ to $0.918337$. The paired
+adversarial SCR improvement is $-0.021242$ with interval $[-0.045223, -0.004900]$. At the task level, the
+intervention improves standard C-BAcc in $5/6$ tasks and adversarial SCR in $5/6$ tasks, indicating that the
+effect is not driven by only one or two assays.
+
+At the same time, the intervention does not yet support a strong benchmark-level mitigation claim. Its adversarial
+SQ-PSR direction splits $3/3$ across tasks, and the paired adversarial C-BAcc interval does not cleanly separate
+from zero. For this reason, we interpret the intervention result as a supported trend: localized supervision can
+improve cliff-side decision quality and reduce collapse, but the current rebuilt release does not yet justify a
+stronger claim.
+
+\subsection{Overall Model Profiles}
+
+Taken together, the rebuilt relaxed benchmark supports three distinct model profiles. ProtoNet is the strongest
+balanced baseline, combining the best average metrics with the most convincing cliff-side decision behavior in the
+full-strength model set. RF is the clearest ranking-competent but decision-collapsed baseline, making it the most
+useful counterexample for the decision-layer collapse interpretation. The cliff-aware \texttt{kNN} variant acts as
+a local rectifier: it does not dominate the benchmark, but it consistently improves several cliff and collapse
+metrics over the vanilla \texttt{kNN} baseline. These profiles are more informative than a single global ranking of
+models because they expose which aspect of few-shot molecular competence each method does, or does not, provide.
+
+\section{Discussion and Limitations}
+
+Our results support a simple but practically important view of few-shot molecular reliability. In cliff-heavy
+regions, it is not enough for a model to preserve coarse similarity-aware ordering. What matters is whether that
+ordering can be converted into a usable local decision rule. CliffBench makes this distinction visible by
+separating ranking-layer and decision-layer behavior. Under this view, the strongest message of the rebuilt release
+is not merely that some models are better than others, but that different models fail in different ways. RF is
+useful precisely because it reveals how strong hard-pair ranking can coexist with weak cliff-side decisions,
+whereas ProtoNet is useful because it shows that a more balanced few-shot baseline is possible without eliminating
+the underlying difficulty.
+
+These findings also suggest a methodological shift for future molecular few-shot work. Progress should not be
+measured only by better aggregate averages or stronger pairwise ranking. If activity cliffs are treated as
+decision-critical probes, then local boundary formation, calibration, and robustness under support-query
+perturbation become central design targets. The modest but consistent gains of the cliff-aware \texttt{kNN}
+intervention point in this direction. They do not solve the problem, but they indicate that explicit attention to
+cliff structure can improve local decision quality without obviously destroying non-cliff behavior.
+
+At the same time, the current study has several limitations. First, the rebuilt benchmark remains narrow. The main
+comparison substrate contains only $6$ relaxed-profile tasks and $2$ strict-profile tasks, which is sufficient for
+a meaningful diagnostic study but still limits the stability of model-ordering and intervention claims. This is
+the main reason why we treat H1 and H3 as supported trends rather than final benchmark-level claims. Second, our
+evidence is benchmark-level and behavioral. While the observed patterns are consistent with shortcut-like reliance
+on global similarity and with local boundary fragility, they do not by themselves constitute causal proof of a
+particular representation or geometric mechanism. Third, the current full-strength comparison set is intentionally
+restricted. MAML is retained only as exploratory compatibility context because its rebuilt release path does not
+yet match the full evaluation budget of the other models. Finally, although the release already exposes both
+standard and adversarial cliff-sensitive metrics, the present paper does not yet include direct threshold-fragility
+analysis or richer control-only artifact reporting; both would make the decision-layer interpretation more explicit.
+
+These limitations define a clear path forward. The next stage is not to make the narrative stronger by language,
+but to make it stronger by evidence: larger task coverage, cleaner control-gap reporting, explicit threshold
+analysis, and broader baseline coverage would all sharpen the present conclusions. Even under the current release
+boundary, however, the central diagnostic point is already clear: few-shot molecular models should be judged not
+only by whether they can rank plausible candidates, but also by whether they can sustain reliable decisions in the
+regions where medicinal chemistry is most discontinuous.
+
+\section{Conclusion}
+
+This paper introduced CliffBench, an activity-cliff diagnostic benchmark and evaluation protocol for assay-local
+few-shot molecular classification. By separating ranking-layer from decision-layer evaluation, CliffBench exposes a
+failure mode that standard aggregate reporting can hide: models may preserve hard-pair ordering while remaining
+fragile at the level of cliff-side decisions. On the rebuilt release, this ranking--decision decoupling is strong
+enough to support a benchmark-level decision-layer collapse interpretation.
+
+Our empirical picture is therefore deliberately asymmetric. Average-metric misalignment with cliff robustness is
+credible but not yet stable enough for a strongest-form claim. The cliff-aware intervention signal is real but
+still modest. The clearest current result is instead that activity cliffs function as high-value probes of whether
+a few-shot molecular model has learned a usable local decision boundary. In this sense, CliffBench is not meant to
+replace standard few-shot benchmarks, but to complement them with a reliability-oriented diagnostic layer.
+
+If few-shot molecular learning is to become useful in realistic discovery settings, it must do more than rank
+similar molecules in roughly the right order. It must also remain trustworthy where small structural changes carry
+large decision consequences. Activity cliffs provide a principled way to test that requirement, and the present
+results show that this requirement is not yet routinely met.
+
+\bibliographystyle{unsrtnat}
+\bibliography{references}
+
+\end{document}

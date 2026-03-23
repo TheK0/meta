@@ -8,6 +8,7 @@ import pandas as pd
 
 from .aggregate import aggregate_task_result_rows, macro_mean
 from .adapters import diagnose_official_adapter_availability
+from .audit import write_attrition_audit
 from .episodes import build_adversarial_episode
 from .hypotheses import (
     compute_cliff_gap_metrics,
@@ -25,7 +26,7 @@ from .pipeline import build_assay_asset_bundle
 from .fetch import write_source_manifest
 from .release import build_release_bundle
 from .reports import render_markdown_report
-from .runner import evaluate_release_with_sklearn_baseline
+from .runner import evaluate_release_with_protonet, evaluate_release_with_sklearn_baseline
 from .constants import EpisodeConfig
 
 
@@ -45,6 +46,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     adapter_status_parser = subparsers.add_parser("adapter-status")
     adapter_status_parser.add_argument("--output", required=True)
+    audit_parser = subparsers.add_parser("audit-attrition")
+    audit_parser.add_argument("--release-dir", required=True)
+    audit_parser.add_argument("--data-dir", required=True)
+    audit_parser.add_argument("--output-dir", required=True)
+    audit_parser.add_argument("--profile", choices=["strict", "relaxed"], default="strict")
+    audit_parser.add_argument("--task-list-file")
+    audit_parser.add_argument("--taus", default="[0.8, 0.85]")
+    audit_parser.add_argument("--deltas", default="[0.5, 1.0]")
+    audit_parser.add_argument("--min-cliff-pairs", default="[10, 25]")
+    audit_parser.add_argument("--min-noncliff-pairs", default="[5, 10]")
     build_assets_parser = subparsers.add_parser("build-assets")
     build_assets_parser.add_argument("--task-file", required=True)
     build_assets_parser.add_argument("--output-dir", required=True)
@@ -54,6 +65,7 @@ def build_parser() -> argparse.ArgumentParser:
     build_release_parser.add_argument("--output-dir", required=True)
     build_release_parser.add_argument("--task-list-file")
     build_release_parser.add_argument("--fsmol-data-version", default="<fixed_version>")
+    build_release_parser.add_argument("--profile", choices=["strict", "relaxed"], default="strict")
     build_release_parser.add_argument("--support-per-class", type=int, default=16)
     build_release_parser.add_argument("--query-per-class", type=int, default=16)
     build_release_parser.add_argument("--episodes-per-split", type=int, default=400)
@@ -66,11 +78,18 @@ def build_parser() -> argparse.ArgumentParser:
     evaluate_parser = subparsers.add_parser("evaluate")
     evaluate_parser.add_argument("--input")
     evaluate_parser.add_argument("--release-dir")
+    evaluate_parser.add_argument("--data-dir")
+    evaluate_parser.add_argument("--checkpoint")
     evaluate_parser.add_argument("--output", required=True)
+    evaluate_parser.add_argument("--profile", choices=["strict", "relaxed"], default="strict")
+    evaluate_parser.add_argument("--result-tier", choices=["final", "intermediate", "exploratory"], default="final")
     evaluate_parser.add_argument("--split-types", default='["standard", "adversarial"]')
     evaluate_parser.add_argument("--model-name", default="kNN")
     evaluate_parser.add_argument("--model-params", default="{}")
-    evaluate_parser.add_argument("--backend", choices=["local", "official"], default="local")
+    evaluate_parser.add_argument("--backend", choices=["local", "official", "cliff-aware", "protonet"], default="local")
+    evaluate_parser.add_argument("--batch-size", type=int, default=320)
+    evaluate_parser.add_argument("--max-episodes", type=int)
+    evaluate_parser.add_argument("--device")
 
     aggregate_parser = subparsers.add_parser("aggregate")
     aggregate_parser.add_argument("--input", required=True)
@@ -96,6 +115,18 @@ def main() -> int:
         )
     elif args.command == "adapter-status":
         write_json(Path(args.output), diagnose_official_adapter_availability())
+    elif args.command == "audit-attrition":
+        write_attrition_audit(
+            release_dir=Path(args.release_dir),
+            data_dir=Path(args.data_dir),
+            output_dir=Path(args.output_dir),
+            profile=args.profile,
+            task_list_file=Path(args.task_list_file) if args.task_list_file else None,
+            taus=json.loads(args.taus),
+            deltas=json.loads(args.deltas),
+            min_cliff_pairs=json.loads(args.min_cliff_pairs),
+            min_noncliff_pairs=json.loads(args.min_noncliff_pairs),
+        )
     elif args.command == "build-assets":
         build_assay_asset_bundle(
             task_file=Path(args.task_file),
@@ -112,6 +143,7 @@ def main() -> int:
             ),
             seeds=json.loads(args.seeds),
             episodes_per_split=args.episodes_per_split,
+            profile=args.profile,
             fsmol_data_version=args.fsmol_data_version,
         )
     elif args.command == "build-episodes":
@@ -127,14 +159,32 @@ def main() -> int:
         write_json(Path(args.output), None if episode is None else episode.to_dict())
     elif args.command == "evaluate":
         if args.release_dir:
-            evaluate_release_with_sklearn_baseline(
-                release_dir=Path(args.release_dir),
-                output_path=Path(args.output),
-                split_types=json.loads(args.split_types),
-                model_name=args.model_name,
-                model_params=json.loads(args.model_params),
-                backend=args.backend,
-            )
+            if args.backend == "protonet":
+                if not args.data_dir or not args.checkpoint:
+                    raise ValueError("ProtoNet release evaluation requires --data-dir and --checkpoint.")
+                evaluate_release_with_protonet(
+                    release_dir=Path(args.release_dir),
+                    data_dir=Path(args.data_dir),
+                    checkpoint_path=Path(args.checkpoint),
+                    output_path=Path(args.output),
+                    profile=args.profile,
+                    result_tier=args.result_tier,
+                    split_types=json.loads(args.split_types),
+                    batch_size=args.batch_size,
+                    max_episodes=args.max_episodes,
+                    device=args.device,
+                )
+            else:
+                evaluate_release_with_sklearn_baseline(
+                    release_dir=Path(args.release_dir),
+                    output_path=Path(args.output),
+                    profile=args.profile,
+                    result_tier=args.result_tier,
+                    split_types=json.loads(args.split_types),
+                    model_name=args.model_name,
+                    model_params=json.loads(args.model_params),
+                    backend=args.backend,
+                )
         else:
             payload = json.loads(Path(args.input).read_text())
             query_pairs = [PairRecord(**pair) for pair in payload.get("query_pairs", [])]

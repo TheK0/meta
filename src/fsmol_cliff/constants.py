@@ -39,3 +39,57 @@ DEFAULT_EPISODE_CONFIG = EpisodeConfig()
 DEFAULT_PROTOCOL_CONSTANTS = ProtocolConstants()
 DEFAULT_SEEDS = (0, 1, 2, 3, 4)
 DEFAULT_EPISODES_PER_SPLIT = 400
+
+
+@dataclass(frozen=True)
+class BenchmarkProfile:
+    name: str
+    constants: ProtocolConstants
+    min_cliff_pairs: int = 25
+    min_noncliff_pairs: int = 10
+    min_valid_molecules: int = 50
+    min_positive_molecules: int = 15
+    min_negative_molecules: int = 15
+    min_anchor_molecules: int = 10
+    min_cliff_negatives: int = 10
+    min_m_avail: int = 2
+
+    def to_dict(self) -> dict:
+        return {
+            "name": self.name,
+            **self.constants.to_dict(),
+            "min_cliff_pairs": self.min_cliff_pairs,
+            "min_noncliff_pairs": self.min_noncliff_pairs,
+            "min_valid_molecules": self.min_valid_molecules,
+            "min_positive_molecules": self.min_positive_molecules,
+            "min_negative_molecules": self.min_negative_molecules,
+            "min_anchor_molecules": self.min_anchor_molecules,
+            "min_cliff_negatives": self.min_cliff_negatives,
+            "min_m_avail": self.min_m_avail,
+        }
+
+
+STRICT_PROFILE = BenchmarkProfile(
+    name="strict",
+    constants=ProtocolConstants(
+        similarity_threshold=0.85,
+        activity_gap_threshold=1.0,
+        hard_negative_pool_size=32,
+        adversarial_injection_ratio=0.5,
+    ),
+)
+
+RELAXED_PROFILE = BenchmarkProfile(
+    name="relaxed",
+    constants=ProtocolConstants(
+        similarity_threshold=0.80,
+        activity_gap_threshold=1.0,
+        hard_negative_pool_size=32,
+        adversarial_injection_ratio=0.5,
+    ),
+)
+
+PROFILE_SPECS = {
+    STRICT_PROFILE.name: STRICT_PROFILE,
+    RELAXED_PROFILE.name: RELAXED_PROFILE,
+}
