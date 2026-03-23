@@ -14,11 +14,12 @@ def build_main_table_rows(
     *,
     model_to_aggregate_path: Mapping[str, Path],
     profile: str,
+    result_tier: str = "final",
     metrics: Sequence[tuple[str, str, str]],
 ) -> list[dict]:
     rows: list[dict] = []
     for model_name, path in model_to_aggregate_path.items():
-        lookup = _aggregate_lookup(path, profile=profile)
+        lookup = _aggregate_lookup(path, profile=profile, result_tier=result_tier)
         row = {"model": model_name}
         for split_type, metric, column in metrics:
             row[column] = lookup.get((split_type, metric), {}).get("score")
@@ -30,10 +31,11 @@ def build_failure_taxonomy_rows(
     *,
     model_to_aggregate_path: Mapping[str, Path],
     profile: str,
+    result_tier: str = "final",
 ) -> list[dict]:
     rows: list[dict] = []
     for model_name, path in model_to_aggregate_path.items():
-        lookup = _aggregate_lookup(path, profile=profile)
+        lookup = _aggregate_lookup(path, profile=profile, result_tier=result_tier)
         std_q_psr = _score(lookup, "standard", "q_psr")
         std_c_bacc = _score(lookup, "standard", "c_bacc")
         adv_sq_psr = _score(lookup, "adversarial", "sq_psr")
@@ -68,6 +70,7 @@ def build_paired_model_comparison_rows(
     *,
     model_to_task_result_rows: Mapping[str, Sequence[Mapping]],
     profile: str,
+    result_tier: str = "final",
     comparisons: Sequence[tuple[str, str]] | None = None,
     metrics: Sequence[tuple[str, str]] = (),
     bootstrap_iterations: int = 10_000,
@@ -78,7 +81,11 @@ def build_paired_model_comparison_rows(
 
     rows: list[dict] = []
     per_model_lookup = {
-        model_name: _task_metric_lookup(task_rows, profile=profile)
+        model_name: _task_metric_lookup(
+            task_rows,
+            profile=profile,
+            result_tier=result_tier,
+        )
         for model_name, task_rows in model_to_task_result_rows.items()
     }
     for baseline_model, treatment_model in comparisons:
@@ -102,6 +109,7 @@ def build_paired_model_comparison_rows(
             rows.append(
                 {
                     "profile": profile,
+                    "result_tier": result_tier,
                     "baseline_model": baseline_model,
                     "treatment_model": treatment_model,
                     "split_type": split_type,
@@ -143,12 +151,13 @@ def write_markdown_table(path: Path, rows: Sequence[Mapping]) -> None:
     path.write_text("\n".join(lines) + "\n")
 
 
-def _aggregate_lookup(path: Path, *, profile: str) -> dict[tuple[str, str], dict]:
+def _aggregate_lookup(path: Path, *, profile: str, result_tier: str) -> dict[tuple[str, str], dict]:
     payload = json.loads(path.read_text())
     return {
         (row["split_type"], row["metric"]): row
         for row in payload
         if row.get("profile", profile) == profile
+        and row.get("result_tier", "final") == result_tier
     }
 
 
@@ -157,10 +166,15 @@ def _score(lookup: Mapping[tuple[str, str], Mapping], split_type: str, metric: s
     return float(row["score"]) if row is not None else float("nan")
 
 
-def _task_metric_lookup(rows: Sequence[Mapping], *, profile: str) -> dict[tuple[str, str, str], list[float]]:
+def _task_metric_lookup(
+    rows: Sequence[Mapping],
+    *,
+    profile: str,
+    result_tier: str,
+) -> dict[tuple[str, str, str], list[float]]:
     lookup: dict[tuple[str, str, str], list[float]] = {}
     for row in rows:
-        if row.get("profile", profile) != profile:
+        if row.get("profile", profile) != profile or row.get("result_tier", "final") != result_tier:
             continue
         score = float(row["score"])
         if math.isnan(score):
