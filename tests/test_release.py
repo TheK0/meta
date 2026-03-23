@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from fsmol_cliff.constants import EpisodeConfig
+from fsmol_cliff.constants import EpisodeConfig, PROFILE_SPECS, RELAXED_PROFILE
 from fsmol_cliff.release import build_release_bundle
 
 
@@ -68,6 +68,27 @@ def _small_records() -> list[dict]:
             }
         )
     return records
+
+
+def test_profile_specs_register_auxiliary_relaxed_coverage_extension_profiles() -> None:
+    base_profile = RELAXED_PROFILE.to_dict()
+    relaxed_covext_10_10 = PROFILE_SPECS["relaxed_covext_10_10"].to_dict()
+    relaxed_covext_10_5 = PROFILE_SPECS["relaxed_covext_10_5"].to_dict()
+
+    assert relaxed_covext_10_10["similarity_threshold"] == 0.80
+    assert relaxed_covext_10_10["activity_gap_threshold"] == 1.0
+    assert relaxed_covext_10_10["min_cliff_pairs"] == 10
+    assert relaxed_covext_10_10["min_noncliff_pairs"] == 10
+    assert relaxed_covext_10_5["similarity_threshold"] == 0.80
+    assert relaxed_covext_10_5["activity_gap_threshold"] == 1.0
+    assert relaxed_covext_10_5["min_cliff_pairs"] == 10
+    assert relaxed_covext_10_5["min_noncliff_pairs"] == 5
+
+    for key, value in base_profile.items():
+        if key in {"name", "min_cliff_pairs", "min_noncliff_pairs"}:
+            continue
+        assert relaxed_covext_10_10[key] == value
+        assert relaxed_covext_10_5[key] == value
 
 
 def test_build_release_bundle_writes_profile_aware_task_lists_and_manifests(

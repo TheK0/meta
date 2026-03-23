@@ -8,11 +8,12 @@ from typing import Iterable, Sequence
 import pandas as pd
 
 from .assets import build_assay_assets
+from .constants import PROFILE_SPECS
 from .episodes import compute_m_avail
 from .io import write_json
+from .models import PairRecord
 from .pipeline import load_task_records
 from .release import assay_id_from_path, discover_task_files
-from .models import PairRecord
 
 
 @dataclass(frozen=True)
@@ -51,6 +52,8 @@ _FUNNEL_STAGES = [
     ("n_t_cliff", lambda row, t: row["num_cliff_negatives"] >= t.min_cliff_negatives),
     ("m_avail", lambda row, t: row["m_avail"] >= t.min_m_avail),
 ]
+
+_LEGACY_COMPATIBLE_TASK_SUMMARY_PROFILES = {"strict", "relaxed"}
 
 
 def build_attrition_rows(
@@ -111,16 +114,24 @@ def sweep_attrition_thresholds(
     deltas: Sequence[float],
     min_cliff_pairs: Sequence[int],
     min_noncliff_pairs: Sequence[int],
+    base_thresholds: AuditThresholds | None = None,
 ) -> list[dict]:
     results = []
+    base = base_thresholds or AuditThresholds()
     for tau in taus:
         for delta in deltas:
             subset = [summary for summary in summaries if summary["tau"] == tau and summary["delta"] == delta]
             for cliff_threshold in min_cliff_pairs:
                 for noncliff_threshold in min_noncliff_pairs:
                     thresholds = AuditThresholds(
+                        min_valid_molecules=base.min_valid_molecules,
+                        min_positive_molecules=base.min_positive_molecules,
+                        min_negative_molecules=base.min_negative_molecules,
                         min_cliff_pairs=cliff_threshold,
                         min_noncliff_pairs=noncliff_threshold,
+                        min_anchor_molecules=base.min_anchor_molecules,
+                        min_cliff_negatives=base.min_cliff_negatives,
+                        min_m_avail=base.min_m_avail,
                     )
                     rows = build_attrition_rows(subset, thresholds=thresholds)
                     eligible = [row for row in rows if row["benchmark_eligible"]]
@@ -195,6 +206,20 @@ def build_real_audit_summaries(
     return summaries
 
 
+def _thresholds_for_profile(profile: str) -> AuditThresholds:
+    profile_spec = PROFILE_SPECS[profile]
+    return AuditThresholds(
+        min_valid_molecules=profile_spec.min_valid_molecules,
+        min_positive_molecules=profile_spec.min_positive_molecules,
+        min_negative_molecules=profile_spec.min_negative_molecules,
+        min_cliff_pairs=profile_spec.min_cliff_pairs,
+        min_noncliff_pairs=profile_spec.min_noncliff_pairs,
+        min_anchor_molecules=profile_spec.min_anchor_molecules,
+        min_cliff_negatives=profile_spec.min_cliff_negatives,
+        min_m_avail=profile_spec.min_m_avail,
+    )
+
+
 def write_attrition_audit(
     *,
     release_dir: Path,
@@ -209,20 +234,21 @@ def write_attrition_audit(
 ) -> dict:
     output_dir.mkdir(parents=True, exist_ok=True)
     task_summaries_path = _resolve_task_summaries_path(release_dir, profile=profile)
-    strict_rows = pd.read_parquet(task_summaries_path).to_dict(orient="records")
-    strict_summaries = [
+    profile_spec = PROFILE_SPECS[profile]
+    profile_rows = pd.read_parquet(task_summaries_path).to_dict(orient="records")
+    profile_summaries = [
         {
             **row,
             "raw_assay_present": True,
-            "tau": row.get("tau", 0.85 if profile == "strict" else 0.8),
-            "delta": 1.0,
+            "tau": profile_spec.constants.similarity_threshold,
+            "delta": profile_spec.constants.activity_gap_threshold,
             "num_highsim_discordant_pairs": row.get("num_cliff_pairs", 0) + row.get("num_noncliff_highsim_pairs", 0),
             "num_same_scaffold_cliff_pairs": row.get("num_same_scaffold_cliff_pairs", 0),
         }
-        for row in strict_rows
+        for row in profile_rows
     ]
-    thresholds = AuditThresholds()
-    attrition_rows = build_attrition_rows(strict_summaries, thresholds=thresholds)
+    thresholds = _thresholds_for_profile(profile)
+    attrition_rows = build_attrition_rows(profile_summaries, thresholds=thresholds)
     funnel = build_attrition_funnel(attrition_rows)
 
     sweep_summaries = build_real_audit_summaries(
@@ -237,6 +263,7 @@ def write_attrition_audit(
         deltas=deltas,
         min_cliff_pairs=min_cliff_pairs,
         min_noncliff_pairs=min_noncliff_pairs,
+        base_thresholds=thresholds,
     )
 
     pd.DataFrame(attrition_rows).to_parquet(output_dir / "attrition_by_assay.parquet", index=False)
@@ -255,4 +282,15 @@ def write_attrition_audit(
 def _resolve_task_summaries_path(release_dir: Path, *, profile: str) -> Path:
     profile_path = release_dir / f"task_summaries_{profile}.parquet"
     legacy_path = release_dir / "task_summaries.parquet"
-    return profile_path if profile_path.exists() else legacy_path
+    if profile_path.exists():
+        return profile_path
+    if legacy_path.exists() and profile in _LEGACY_COMPATIBLE_TASK_SUMMARY_PROFILES:
+        return legacy_path
+    if legacy_path.exists():
+        raise FileNotFoundError(
+            f"Missing {profile_path.name} for profile '{profile}'. "
+            f"Refusing to fall back to legacy {legacy_path.name} because it may encode a different protocol."
+        )
+    raise FileNotFoundError(
+        f"Missing task summaries for profile '{profile}': expected {profile_path.name} in {release_dir}."
+    )

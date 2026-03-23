@@ -4,7 +4,9 @@ import json
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
+from fsmol_cliff.constants import BenchmarkProfile, ProtocolConstants
 from fsmol_cliff.audit import (
     AuditThresholds,
     build_attrition_funnel,
@@ -318,3 +320,213 @@ def test_write_attrition_audit_reads_profile_specific_summaries_and_writes_v4_na
     assert not (audit_dir / "threshold_sweep.parquet").exists()
     payload = json.loads((audit_dir / "attrition_summary.json").read_text())
     assert payload["profile"] == "relaxed"
+
+
+def test_write_attrition_audit_infers_thresholds_and_protocol_from_requested_profile(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    release_dir = tmp_path / "release"
+    audit_dir = tmp_path / "audit"
+    release_dir.mkdir()
+    pd.DataFrame(
+        [
+            {
+                "assay_id": "CHEMBL_AUX",
+                "num_valid_molecules": 60,
+                "num_positive_molecules": 20,
+                "num_negative_molecules": 20,
+                "num_cliff_pairs": 10,
+                "num_noncliff_highsim_pairs": 5,
+                "num_anchor_molecules": 10,
+                "num_cliff_negatives": 10,
+                "num_same_scaffold_cliff_pairs": 2,
+                "m_avail": 2,
+            }
+        ]
+    ).to_parquet(release_dir / "task_summaries_relaxed_covext_10_5.parquet", index=False)
+
+    monkeypatch.setattr(
+        "fsmol_cliff.audit.PROFILE_SPECS",
+        {
+            "relaxed_covext_10_5": BenchmarkProfile(
+                name="relaxed_covext_10_5",
+                constants=ProtocolConstants(
+                    similarity_threshold=0.77,
+                    activity_gap_threshold=1.3,
+                    hard_negative_pool_size=32,
+                    adversarial_injection_ratio=0.5,
+                ),
+                min_cliff_pairs=10,
+                min_noncliff_pairs=5,
+            )
+        },
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "fsmol_cliff.audit.build_real_audit_summaries",
+        lambda **_: [
+            _summary(
+                "CHEMBL_AUX",
+                tau=0.77,
+                delta=1.3,
+                num_highsim_discordant_pairs=15,
+                num_cliff_pairs=10,
+                num_noncliff_highsim_pairs=5,
+                num_anchor_molecules=10,
+                num_cliff_negatives=10,
+                num_same_scaffold_cliff_pairs=2,
+                m_avail=2,
+            )
+        ],
+    )
+
+    summary = write_attrition_audit(
+        release_dir=release_dir,
+        data_dir=tmp_path / "fsmol",
+        output_dir=audit_dir,
+        profile="relaxed_covext_10_5",
+        taus=[0.77],
+        deltas=[1.3],
+        min_cliff_pairs=[10],
+        min_noncliff_pairs=[5],
+    )
+
+    attrition_rows = pd.read_parquet(audit_dir / "attrition_by_assay.parquet").to_dict(orient="records")
+
+    assert summary["profile"] == "relaxed_covext_10_5"
+    assert summary["eligible_assays"] == 1
+    assert summary["adversarial_eligible_assays"] == 1
+    assert attrition_rows == [
+        {
+            "assay_id": "CHEMBL_AUX",
+            "num_valid_molecules": 60,
+            "num_positive_molecules": 20,
+            "num_negative_molecules": 20,
+            "num_cliff_pairs": 10,
+            "num_noncliff_highsim_pairs": 5,
+            "num_anchor_molecules": 10,
+            "num_cliff_negatives": 10,
+            "num_same_scaffold_cliff_pairs": 2,
+            "m_avail": 2,
+            "raw_assay_present": True,
+            "tau": 0.77,
+            "delta": 1.3,
+            "num_highsim_discordant_pairs": 15,
+            "failure_stage": None,
+            "benchmark_eligible": True,
+            "adversarial_eligible": True,
+        }
+    ]
+
+
+def test_write_attrition_audit_rejects_legacy_task_summaries_for_auxiliary_profile(
+    tmp_path: Path,
+) -> None:
+    release_dir = tmp_path / "release"
+    audit_dir = tmp_path / "audit"
+    release_dir.mkdir()
+    pd.DataFrame([_summary("CHEMBL_LEGACY")]).to_parquet(release_dir / "task_summaries.parquet", index=False)
+
+    with pytest.raises(FileNotFoundError, match="task_summaries_relaxed_covext_10_10.parquet"):
+        write_attrition_audit(
+            release_dir=release_dir,
+            data_dir=tmp_path / "fsmol",
+            output_dir=audit_dir,
+            profile="relaxed_covext_10_10",
+            taus=[0.8],
+            deltas=[1.0],
+            min_cliff_pairs=[10],
+            min_noncliff_pairs=[10],
+        )
+
+
+def test_write_attrition_audit_threshold_sensitivity_preserves_profile_non_swept_gates(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    release_dir = tmp_path / "release"
+    audit_dir = tmp_path / "audit"
+    release_dir.mkdir()
+    pd.DataFrame(
+        [
+            {
+                "assay_id": "CHEMBL_SWEEP",
+                "num_valid_molecules": 60,
+                "num_positive_molecules": 20,
+                "num_negative_molecules": 20,
+                "num_cliff_pairs": 10,
+                "num_noncliff_highsim_pairs": 5,
+                "num_anchor_molecules": 10,
+                "num_cliff_negatives": 10,
+                "num_same_scaffold_cliff_pairs": 1,
+                "m_avail": 2,
+            }
+        ]
+    ).to_parquet(release_dir / "task_summaries_relaxed_covext_10_5.parquet", index=False)
+
+    monkeypatch.setattr(
+        "fsmol_cliff.audit.PROFILE_SPECS",
+        {
+            "relaxed_covext_10_5": BenchmarkProfile(
+                name="relaxed_covext_10_5",
+                constants=ProtocolConstants(
+                    similarity_threshold=0.8,
+                    activity_gap_threshold=1.0,
+                    hard_negative_pool_size=32,
+                    adversarial_injection_ratio=0.5,
+                ),
+                min_cliff_pairs=10,
+                min_noncliff_pairs=5,
+                min_valid_molecules=65,
+            )
+        },
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "fsmol_cliff.audit.build_real_audit_summaries",
+        lambda **_: [
+            _summary(
+                "CHEMBL_SWEEP",
+                tau=0.8,
+                delta=1.0,
+                num_valid_molecules=60,
+                num_highsim_discordant_pairs=15,
+                num_cliff_pairs=10,
+                num_noncliff_highsim_pairs=5,
+                num_anchor_molecules=10,
+                num_cliff_negatives=10,
+                num_same_scaffold_cliff_pairs=1,
+                m_avail=2,
+            )
+        ],
+    )
+
+    write_attrition_audit(
+        release_dir=release_dir,
+        data_dir=tmp_path / "fsmol",
+        output_dir=audit_dir,
+        profile="relaxed_covext_10_5",
+        taus=[0.8],
+        deltas=[1.0],
+        min_cliff_pairs=[10],
+        min_noncliff_pairs=[5],
+    )
+
+    threshold_rows = pd.read_parquet(audit_dir / "threshold_sensitivity.parquet").to_dict(orient="records")
+
+    assert threshold_rows == [
+        {
+            "tau": 0.8,
+            "delta": 1.0,
+            "min_cliff_pairs": 10,
+            "min_noncliff_pairs": 5,
+            "eligible_assay_count": 0,
+            "total_cliff_pairs": 0,
+            "total_anchors": 0,
+            "adversarial_eligible_assay_count": 0,
+            "same_scaffold_assay_count": 0,
+            "same_scaffold_assay_fraction": 0.0,
+            "same_scaffold_cliff_pair_count": 0,
+        }
+    ]

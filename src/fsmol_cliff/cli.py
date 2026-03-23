@@ -27,12 +27,13 @@ from .fetch import write_source_manifest
 from .release import build_release_bundle
 from .reports import render_markdown_report
 from .runner import evaluate_release_with_protonet, evaluate_release_with_sklearn_baseline
-from .constants import EpisodeConfig
+from .constants import EpisodeConfig, PROFILE_SPECS
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="fsmol-cliff")
     subparsers = parser.add_subparsers(dest="command", required=True)
+    profile_choices = sorted(PROFILE_SPECS)
 
     fetch_parser = subparsers.add_parser("fetch-fsmol")
     fetch_parser.add_argument("--data-dir", required=True)
@@ -50,7 +51,7 @@ def build_parser() -> argparse.ArgumentParser:
     audit_parser.add_argument("--release-dir", required=True)
     audit_parser.add_argument("--data-dir", required=True)
     audit_parser.add_argument("--output-dir", required=True)
-    audit_parser.add_argument("--profile", choices=["strict", "relaxed"], default="strict")
+    audit_parser.add_argument("--profile", choices=profile_choices, default="strict")
     audit_parser.add_argument("--task-list-file")
     audit_parser.add_argument("--taus", default="[0.8, 0.85]")
     audit_parser.add_argument("--deltas", default="[0.5, 1.0]")
@@ -65,7 +66,7 @@ def build_parser() -> argparse.ArgumentParser:
     build_release_parser.add_argument("--output-dir", required=True)
     build_release_parser.add_argument("--task-list-file")
     build_release_parser.add_argument("--fsmol-data-version", default="<fixed_version>")
-    build_release_parser.add_argument("--profile", choices=["strict", "relaxed"], default="strict")
+    build_release_parser.add_argument("--profile", choices=profile_choices, default="strict")
     build_release_parser.add_argument("--support-per-class", type=int, default=16)
     build_release_parser.add_argument("--query-per-class", type=int, default=16)
     build_release_parser.add_argument("--episodes-per-split", type=int, default=400)
@@ -81,7 +82,7 @@ def build_parser() -> argparse.ArgumentParser:
     evaluate_parser.add_argument("--data-dir")
     evaluate_parser.add_argument("--checkpoint")
     evaluate_parser.add_argument("--output", required=True)
-    evaluate_parser.add_argument("--profile", choices=["strict", "relaxed"], default="strict")
+    evaluate_parser.add_argument("--profile", choices=profile_choices, default="strict")
     evaluate_parser.add_argument("--result-tier", choices=["final", "intermediate", "exploratory"], default="final")
     evaluate_parser.add_argument("--split-types", default='["standard", "adversarial"]')
     evaluate_parser.add_argument("--model-name", default="kNN")

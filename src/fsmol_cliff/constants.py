@@ -89,7 +89,23 @@ RELAXED_PROFILE = BenchmarkProfile(
     ),
 )
 
+RELAXED_COVEXT_10_10_PROFILE = BenchmarkProfile(
+    name="relaxed_covext_10_10",
+    constants=RELAXED_PROFILE.constants,
+    min_cliff_pairs=10,
+    min_noncliff_pairs=10,
+)
+
+RELAXED_COVEXT_10_5_PROFILE = BenchmarkProfile(
+    name="relaxed_covext_10_5",
+    constants=RELAXED_PROFILE.constants,
+    min_cliff_pairs=10,
+    min_noncliff_pairs=5,
+)
+
 PROFILE_SPECS = {
     STRICT_PROFILE.name: STRICT_PROFILE,
     RELAXED_PROFILE.name: RELAXED_PROFILE,
+    RELAXED_COVEXT_10_10_PROFILE.name: RELAXED_COVEXT_10_10_PROFILE,
+    RELAXED_COVEXT_10_5_PROFILE.name: RELAXED_COVEXT_10_5_PROFILE,
 }

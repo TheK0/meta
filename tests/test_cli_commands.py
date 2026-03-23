@@ -7,7 +7,8 @@ from pathlib import Path
 
 import pandas as pd
 
-from fsmol_cliff.cli import main
+from fsmol_cliff.cli import build_parser, main
+from fsmol_cliff.constants import PROFILE_SPECS
 
 
 def _write_jsonl_gz(path: Path, records: list[dict]) -> None:
@@ -15,6 +16,60 @@ def _write_jsonl_gz(path: Path, records: list[dict]) -> None:
     with gzip.open(path, "wt") as handle:
         for record in records:
             handle.write(json.dumps(record) + "\n")
+
+
+def test_profile_aware_commands_offer_registered_profile_choices() -> None:
+    parser = build_parser()
+    subparsers = next(action for action in parser._actions if action.dest == "command")
+    expected_choices = sorted(PROFILE_SPECS)
+
+    for command_name in ("audit-attrition", "build-release", "evaluate"):
+        command_parser = subparsers.choices[command_name]
+        profile_action = next(action for action in command_parser._actions if action.dest == "profile")
+        assert profile_action.choices == expected_choices
+
+    assert (
+        parser.parse_args(
+            [
+                "build-release",
+                "--data-dir",
+                "/tmp/data",
+                "--output-dir",
+                "/tmp/release",
+                "--profile",
+                "relaxed_covext_10_10",
+            ]
+        ).profile
+        == "relaxed_covext_10_10"
+    )
+    assert (
+        parser.parse_args(
+            [
+                "audit-attrition",
+                "--release-dir",
+                "/tmp/release",
+                "--data-dir",
+                "/tmp/data",
+                "--output-dir",
+                "/tmp/audit",
+                "--profile",
+                "relaxed_covext_10_5",
+            ]
+        ).profile
+        == "relaxed_covext_10_5"
+    )
+    assert (
+        parser.parse_args(
+            [
+                "evaluate",
+                "--output",
+                "/tmp/results.json",
+                "--profile",
+                "relaxed_covext_10_10",
+            ]
+        ).profile
+        == "relaxed_covext_10_10"
+    )
 
 
 def test_build_assets_command_writes_asset_bundle(tmp_path: Path, monkeypatch) -> None:
