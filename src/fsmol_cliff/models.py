@@ -6,6 +6,7 @@ from .constants import (
     DEFAULT_EPISODE_CONFIG,
     DEFAULT_EPISODES_PER_SPLIT,
     DEFAULT_SEEDS,
+    FINAL_PROFILE_SPECS,
     PROFILE_SPECS,
     EpisodeConfig,
 )
@@ -40,7 +41,7 @@ class BenchmarkManifest:
             episode_config=DEFAULT_EPISODE_CONFIG,
             seeds=DEFAULT_SEEDS,
             episodes_per_split=DEFAULT_EPISODES_PER_SPLIT,
-            profiles={name: profile.to_dict() for name, profile in PROFILE_SPECS.items()},
+            profiles={name: profile.to_dict() for name, profile in FINAL_PROFILE_SPECS.items()},
         )
 
     def to_dict(self) -> dict:

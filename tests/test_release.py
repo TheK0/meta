@@ -91,6 +91,37 @@ def test_profile_specs_register_auxiliary_relaxed_coverage_extension_profiles() 
         assert relaxed_covext_10_5[key] == value
 
 
+def test_build_release_bundle_adds_auxiliary_profile_to_release_manifest(tmp_path: Path, monkeypatch) -> None:
+    data_dir = tmp_path / "fsmol"
+    test_dir = data_dir / "test"
+    output_dir = tmp_path / "release"
+
+    _write_task(test_dir / "CHEMBL_ELIGIBLE.jsonl.gz", _eligible_records())
+
+    def fake_similarity(smiles_a: str | None, smiles_b: str | None) -> float | None:
+        if not smiles_a or not smiles_b:
+            return None
+        return 0.9 if smiles_a[0] != smiles_b[0] else 0.1
+
+    monkeypatch.setattr("fsmol_cliff.assets.tanimoto_similarity", fake_similarity)
+
+    build_release_bundle(
+        data_dir=data_dir,
+        output_dir=output_dir,
+        episode_config=EpisodeConfig(support_per_class=2, query_per_class=4),
+        seeds=[0],
+        episodes_per_split=1,
+        profile="relaxed_covext_10_10",
+        fsmol_data_version="fsmol-test",
+    )
+
+    benchmark_manifest = json.loads((output_dir / "benchmark_manifest.json").read_text())
+    assert set(benchmark_manifest["profiles"]) == {"strict", "relaxed", "relaxed_covext_10_10"}
+    assert benchmark_manifest["profiles"]["relaxed_covext_10_10"]["min_cliff_pairs"] == 10
+    assert benchmark_manifest["profiles"]["relaxed_covext_10_10"]["min_noncliff_pairs"] == 10
+    assert benchmark_manifest["built_profiles"] == ["relaxed_covext_10_10"]
+
+
 def test_build_release_bundle_writes_profile_aware_task_lists_and_manifests(
     tmp_path: Path, monkeypatch
 ) -> None:

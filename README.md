@@ -34,6 +34,11 @@ Current claim status on the released relaxed artifacts:
 - `H2`: formal claim
 - `H3`: supported trend
 
+Release policy note:
+
+- [`outputs/fsmol_cliff_release_v4`](./outputs/fsmol_cliff_release_v4) remains the current `final` benchmark substrate.
+- Any future coverage-extension releases are auxiliary `intermediate` / `exploratory` layers for robustness analysis and do not replace the current final relaxed benchmark.
+
 Release entry points:
 
 - [Release Summary](./outputs/fsmol_cliff_release_v4/release_summary.md)

@@ -207,6 +207,9 @@ def _write_manifest(
     payload["episode_config"] = episode_config.to_dict()
     payload["seeds"] = list(seeds)
     payload["episodes_per_split"] = episodes_per_split
+    payload.setdefault("profiles", {})
+    if built_profile in PROFILE_SPECS:
+        payload["profiles"][built_profile] = PROFILE_SPECS[built_profile].to_dict()
     payload["built_profiles"] = sorted({*payload.get("built_profiles", []), built_profile})
     write_json(path, payload)
 
