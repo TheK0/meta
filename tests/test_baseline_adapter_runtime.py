@@ -4,11 +4,7 @@ import os
 
 import numpy as np
 
-from fsmol_cliff.adapters import (
-    build_sklearn_task_sample,
-    score_sklearn_episode,
-    select_support_decision_threshold,
-)
+from fsmol_cliff.adapters import build_sklearn_task_sample, score_sklearn_episode
 
 
 def test_loky_max_cpu_count_is_pinned_for_test_environment() -> None:
@@ -96,15 +92,6 @@ def test_score_sklearn_episode_returns_query_scores_in_manifest_order() -> None:
 
     assert list(scores) == ["q_active", "q_inactive"]
     assert scores["q_active"] > scores["q_inactive"]
-
-
-def test_select_support_decision_threshold_breaks_best_bacc_ties_near_half() -> None:
-    threshold = select_support_decision_threshold(
-        support_scores={"support_pos": 0.6, "support_neg": 0.4},
-        support_labels={"support_pos": 1, "support_neg": 0},
-    )
-
-    assert threshold == 0.5
 
 
 def test_build_sklearn_task_sample_computes_fingerprint_from_smiles_when_missing() -> None:

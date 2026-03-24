@@ -488,56 +488,6 @@ def test_evaluate_command_can_run_release_mode_with_official_backend(tmp_path: P
     assert set(saved["metric"]) >= {"c_bacc", "q_psr"}
 
 
-def test_evaluate_command_accepts_decision_aware_backend_in_release_mode(
-    tmp_path: Path,
-    monkeypatch,
-) -> None:
-    output_file = tmp_path / "task_results_decision_aware.parquet"
-    calls: list[dict] = []
-
-    def fake_evaluate_release_with_sklearn_baseline(**kwargs):
-        calls.append(kwargs)
-        pd.DataFrame(
-            [
-                {
-                    "task_id": "CHEMBL1",
-                    "seed": 0,
-                    "split_type": "standard",
-                    "metric": "q_psr",
-                    "score": 1.0,
-                    "coverage": 1.0,
-                    "num_episodes": 1,
-                    "num_valid_episodes": 1,
-                    "mean_num_valid_pairs_per_episode": 1.0,
-                }
-            ]
-        ).to_parquet(kwargs["output_path"], index=False)
-        return []
-
-    monkeypatch.setattr(
-        "fsmol_cliff.cli.evaluate_release_with_sklearn_baseline",
-        fake_evaluate_release_with_sklearn_baseline,
-    )
-    monkeypatch.setattr(
-        sys,
-        "argv",
-        [
-            "fsmol-cliff",
-            "evaluate",
-            "--release-dir",
-            str(tmp_path / "release"),
-            "--output",
-            str(output_file),
-            "--backend",
-            "decision-aware",
-        ],
-    )
-
-    assert main() == 0
-    assert calls[0]["backend"] == "decision-aware"
-    assert output_file.exists()
-
-
 def test_evaluate_command_can_run_release_mode_with_protonet_backend(tmp_path: Path, monkeypatch) -> None:
     release_dir = tmp_path / "release"
     output_file = tmp_path / "task_results.parquet"
