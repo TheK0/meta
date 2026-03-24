@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 import warnings
 
@@ -9,6 +10,7 @@ import sklearn.neighbors
 from sklearn.model_selection import GridSearchCV
 
 from .chem import morgan_fingerprint_array
+from .metrics import balanced_accuracy_for_subset
 
 
 NAME_TO_MODEL_CLS = {
@@ -123,30 +125,16 @@ def score_sklearn_episode(
     use_grid_search: bool = False,
     model_params: dict | None = None,
 ) -> dict[str, float]:
-    if use_grid_search:
-        raise NotImplementedError("Grid search is not implemented in the local sklearn fallback.")
-    if model_name not in NAME_TO_MODEL_CLS:
-        raise ValueError(f"Unsupported sklearn adapter model: {model_name}")
-
-    task_sample = build_sklearn_task_sample(
+    model, task_sample = _fit_local_sklearn_estimator(
+        model_name=model_name,
         assay_id=assay_id,
         records_by_id=records_by_id,
         support_ids=support_ids,
         query_ids=query_ids,
+        use_grid_search=use_grid_search,
+        model_params=model_params,
     )
-    X_train = np.array([sample.get_fingerprint() for sample in task_sample.train_samples])
-    y_train = np.array([float(sample.bool_label) for sample in task_sample.train_samples])
-    X_test = np.array([sample.get_fingerprint() for sample in task_sample.test_samples])
-
-    model = NAME_TO_MODEL_CLS[model_name]()
-    if model_params:
-        model.set_params(**model_params)
-    model.fit(X_train, y_train)
-    scores = model.predict_proba(X_test)[:, 1]
-    return {
-        molecule_id: float(score)
-        for molecule_id, score in zip(query_ids, scores)
-    }
+    return _score_episode_samples(model, task_sample.test_samples)
 
 
 def score_official_baseline_episode(
@@ -230,20 +218,94 @@ def score_cliff_aware_sklearn_episode(
     use_grid_search: bool = False,
     model_params: dict | None = None,
 ) -> dict[str, float]:
-    extra_negatives = select_cliff_aware_hard_negatives(
+    augmented_support_ids = _build_cliff_aware_support_ids(
         support_pos_ids=support_pos_ids,
-        excluded_ids=set(support_pos_ids) | set(support_neg_ids) | set(query_ids),
+        support_neg_ids=support_neg_ids,
+        query_ids=query_ids,
         anchor_to_hardnegs=anchor_to_hardnegs,
     )
     return score_sklearn_episode(
         model_name=model_name,
         assay_id=assay_id,
         records_by_id=records_by_id,
-        support_ids=[*support_pos_ids, *support_neg_ids, *extra_negatives],
+        support_ids=augmented_support_ids,
         query_ids=query_ids,
         use_grid_search=use_grid_search,
         model_params=model_params,
     )
+
+
+def score_decision_aware_sklearn_episode(
+    *,
+    model_name: str,
+    assay_id: str,
+    records_by_id: dict[str, dict],
+    support_pos_ids: list[str],
+    support_neg_ids: list[str],
+    query_ids: list[str],
+    anchor_to_hardnegs: dict[str, list[str]],
+    use_grid_search: bool = False,
+    model_params: dict | None = None,
+) -> dict[str, object]:
+    if model_name != "kNN":
+        raise ValueError("The decision-aware backend currently supports only model_name='kNN'.")
+    augmented_support_ids = _build_cliff_aware_support_ids(
+        support_pos_ids=support_pos_ids,
+        support_neg_ids=support_neg_ids,
+        query_ids=query_ids,
+        anchor_to_hardnegs=anchor_to_hardnegs,
+    )
+    model, task_sample = _fit_local_sklearn_estimator(
+        model_name=model_name,
+        assay_id=assay_id,
+        records_by_id=records_by_id,
+        support_ids=augmented_support_ids,
+        query_ids=query_ids,
+        use_grid_search=use_grid_search,
+        model_params=model_params,
+    )
+    support_scores = _score_episode_samples(model, task_sample.train_samples)
+    support_labels = {sample.molecule_id: int(sample.bool_label) for sample in task_sample.train_samples}
+    return {
+        "scores": _score_episode_samples(model, task_sample.test_samples),
+        "decision_threshold": select_support_decision_threshold(
+            support_scores=support_scores,
+            support_labels=support_labels,
+        ),
+    }
+
+
+def select_support_decision_threshold(
+    *,
+    support_scores: Mapping[str, float],
+    support_labels: Mapping[str, int],
+) -> float:
+    valid_ids = [molecule_id for molecule_id in support_scores if molecule_id in support_labels]
+    if not valid_ids:
+        return 0.5
+
+    unique_scores = sorted({float(support_scores[molecule_id]) for molecule_id in valid_ids})
+    candidate_thresholds = {0.5, *unique_scores}
+    if unique_scores:
+        candidate_thresholds.add(float(np.nextafter(max(unique_scores), np.inf)))
+
+    labels = {molecule_id: int(support_labels[molecule_id]) for molecule_id in valid_ids}
+    ranked_candidates = []
+    for threshold in candidate_thresholds:
+        predictions = {
+            molecule_id: int(float(support_scores[molecule_id]) >= float(threshold))
+            for molecule_id in valid_ids
+        }
+        balanced_accuracy = balanced_accuracy_for_subset(None, labels, predictions, valid_ids)
+        ranked_candidates.append(
+            (
+                -1.0 if balanced_accuracy is None else -float(balanced_accuracy),
+                abs(float(threshold) - 0.5),
+                float(threshold),
+            )
+        )
+    _, _, best_threshold = min(ranked_candidates)
+    return best_threshold
 
 
 def diagnose_official_adapter_availability() -> dict[str, dict[str, object]]:
@@ -284,3 +346,59 @@ def _record_to_episode_molecule(record: dict) -> SklearnEpisodeMolecule:
         bool_label=bool(record["label"]),
         fingerprint=np.asarray(fingerprint, dtype=np.float32),
     )
+
+
+def _build_cliff_aware_support_ids(
+    *,
+    support_pos_ids: list[str],
+    support_neg_ids: list[str],
+    query_ids: list[str],
+    anchor_to_hardnegs: dict[str, list[str]],
+) -> list[str]:
+    extra_negatives = select_cliff_aware_hard_negatives(
+        support_pos_ids=support_pos_ids,
+        excluded_ids=set(support_pos_ids) | set(support_neg_ids) | set(query_ids),
+        anchor_to_hardnegs=anchor_to_hardnegs,
+    )
+    return [*support_pos_ids, *support_neg_ids, *extra_negatives]
+
+
+def _fit_local_sklearn_estimator(
+    *,
+    model_name: str,
+    assay_id: str,
+    records_by_id: dict[str, dict],
+    support_ids: list[str],
+    query_ids: list[str],
+    use_grid_search: bool,
+    model_params: dict | None,
+):
+    if use_grid_search:
+        raise NotImplementedError("Grid search is not implemented in the local sklearn fallback.")
+    if model_name not in NAME_TO_MODEL_CLS:
+        raise ValueError(f"Unsupported sklearn adapter model: {model_name}")
+
+    task_sample = build_sklearn_task_sample(
+        assay_id=assay_id,
+        records_by_id=records_by_id,
+        support_ids=support_ids,
+        query_ids=query_ids,
+    )
+    X_train = np.array([sample.get_fingerprint() for sample in task_sample.train_samples])
+    y_train = np.array([float(sample.bool_label) for sample in task_sample.train_samples])
+
+    model = NAME_TO_MODEL_CLS[model_name]()
+    if model_params:
+        model.set_params(**model_params)
+    model.fit(X_train, y_train)
+    return model, task_sample
+
+
+def _score_episode_samples(model, samples: tuple[SklearnEpisodeMolecule, ...]) -> dict[str, float]:
+    if not samples:
+        return {}
+    scores = model.predict_proba(np.array([sample.get_fingerprint() for sample in samples]))[:, 1]
+    return {
+        sample.molecule_id: float(score)
+        for sample, score in zip(samples, scores)
+    }

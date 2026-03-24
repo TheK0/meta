@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Iterable
-from typing import Callable, Mapping
+from collections.abc import Iterable, Mapping
+from typing import Callable
 
 from sklearn.metrics import average_precision_score
 
@@ -15,11 +15,11 @@ def evaluate_episode_manifest(
     *,
     episode: dict,
     assay_context: dict,
-    score_fn: Callable[[dict], dict[str, float]],
+    score_fn: Callable[[dict], Mapping[str, float] | Mapping[str, object]],
 ) -> dict:
     labels = assay_context["labels"]
-    scores = score_fn(episode)
-    predictions = {molecule_id: 1 if score >= 0.5 else 0 for molecule_id, score in scores.items()}
+    scores, decision_threshold = _normalize_score_payload(score_fn(episode))
+    predictions = {molecule_id: 1 if score >= decision_threshold else 0 for molecule_id, score in scores.items()}
     support_ids = [*episode["support_pos_ids"], *episode["support_neg_ids"]]
     query_ids = [*episode["query_pos_ids"], *episode["query_neg_ids"]]
     query_pos_ids = set(episode["query_pos_ids"])
@@ -200,6 +200,17 @@ def _scored_query_ids(
     query_ids: Iterable[str],
 ) -> list[str]:
     return [molecule_id for molecule_id in query_ids if molecule_id in labels and molecule_id in scores]
+
+
+def _normalize_score_payload(
+    score_payload: Mapping[str, float] | Mapping[str, object],
+) -> tuple[dict[object, float], float]:
+    if "scores" in score_payload and isinstance(score_payload["scores"], Mapping):
+        raw_scores = score_payload["scores"]
+        scores = {molecule_id: float(score) for molecule_id, score in raw_scores.items()}
+        threshold = float(score_payload.get("decision_threshold", 0.5))
+        return scores, threshold
+    return {molecule_id: float(score) for molecule_id, score in score_payload.items()}, 0.5
 
 
 def _summarize_episode_context(episode_contexts: Iterable[Mapping[str, float | int | None]]) -> dict[str, float | None]:

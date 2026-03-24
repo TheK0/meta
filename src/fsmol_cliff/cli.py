@@ -87,7 +87,11 @@ def build_parser() -> argparse.ArgumentParser:
     evaluate_parser.add_argument("--split-types", default='["standard", "adversarial"]')
     evaluate_parser.add_argument("--model-name", default="kNN")
     evaluate_parser.add_argument("--model-params", default="{}")
-    evaluate_parser.add_argument("--backend", choices=["local", "official", "cliff-aware", "protonet"], default="local")
+    evaluate_parser.add_argument(
+        "--backend",
+        choices=["local", "official", "cliff-aware", "decision-aware", "protonet"],
+        default="local",
+    )
     evaluate_parser.add_argument("--batch-size", type=int, default=320)
     evaluate_parser.add_argument("--max-episodes", type=int)
     evaluate_parser.add_argument("--device")

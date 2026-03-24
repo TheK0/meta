@@ -7,7 +7,12 @@ from typing import Sequence
 
 import pandas as pd
 
-from .adapters import score_cliff_aware_sklearn_episode, score_official_baseline_episode, score_sklearn_episode
+from .adapters import (
+    score_cliff_aware_sklearn_episode,
+    score_decision_aware_sklearn_episode,
+    score_official_baseline_episode,
+    score_sklearn_episode,
+)
 from .evaluation import evaluate_episode_manifest, summarize_task_metric_rows
 from .io import write_parquet
 from .protonet_runner import (
@@ -44,6 +49,8 @@ def evaluate_release_with_sklearn_baseline(
                 scorer = score_official_baseline_episode
             elif backend == "cliff-aware":
                 scorer = score_cliff_aware_sklearn_episode
+            elif backend == "decision-aware":
+                scorer = score_decision_aware_sklearn_episode
             else:
                 raise ValueError(f"Unsupported backend: {backend}")
             episode_result = evaluate_episode_manifest(
