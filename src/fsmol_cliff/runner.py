@@ -9,12 +9,8 @@ import pandas as pd
 
 from .adapters import score_cliff_aware_sklearn_episode, score_official_baseline_episode, score_sklearn_episode
 from .evaluation import evaluate_episode_manifest, summarize_task_metric_rows
-from .io import write_parquet
-from .protonet_runner import (
-    load_protonet_model as _load_protonet_model,
-    load_task_sample_map as _load_task_sample_map,
-    score_protonet_manifest_episode as _score_protonet_manifest_episode,
-)
+from .io import load_assay_context, resolve_assay_path, resolve_manifest_path, write_parquet
+from . import protonet_runner as _pn  # noqa: F401 — used via _pn.xxx lookups for monkeypatch compatibility
 
 
 def evaluate_release_with_sklearn_baseline(
@@ -31,13 +27,13 @@ def evaluate_release_with_sklearn_baseline(
     assay_context_cache: dict[str, dict] = {}
     episode_results: list[dict] = []
     for split_type in split_types:
-        manifest_path = _resolve_manifest_path(release_dir, split_type=split_type, profile=profile)
+        manifest_path = resolve_manifest_path(release_dir, split_type=split_type, profile=profile)
         if not manifest_path.exists():
             continue
         frame = pd.read_parquet(manifest_path)
         for episode in frame.to_dict(orient="records"):
             task_id = episode["task_id"]
-            assay_context = assay_context_cache.setdefault(task_id, _load_assay_context(release_dir, task_id, profile=profile))
+            assay_context = assay_context_cache.setdefault(task_id, load_assay_context(release_dir, task_id, profile=profile))
             if backend == "local":
                 scorer = score_sklearn_episode
             elif backend == "official":
@@ -201,7 +197,7 @@ def evaluate_release_with_maml_legacy(
     assay_context_cache: dict[str, dict] = {}
     episode_results: list[dict] = []
     for split_type in split_types:
-        manifest_path = _resolve_manifest_path(release_dir, split_type=split_type, profile=profile)
+        manifest_path = resolve_manifest_path(release_dir, split_type=split_type, profile=profile)
         if not manifest_path.exists():
             continue
         frame = pd.read_parquet(manifest_path)
@@ -210,7 +206,7 @@ def evaluate_release_with_maml_legacy(
         if seeds is not None:
             frame = frame[frame["seed"].isin(seeds)]
         for task_id in frame["task_id"].drop_duplicates().tolist():
-            assay_context = assay_context_cache.setdefault(task_id, _load_assay_context(release_dir, task_id, profile=profile))
+            assay_context = assay_context_cache.setdefault(task_id, load_assay_context(release_dir, task_id, profile=profile))
             for seed in sorted(frame[frame["task_id"] == task_id]["seed"].drop_duplicates().tolist()):
                 episodes = (
                     frame[(frame["task_id"] == task_id) & (frame["seed"] == seed)]
@@ -245,31 +241,21 @@ def evaluate_release_with_maml_legacy(
     return rows
 
 
-load_protonet_model = _load_protonet_model
-load_task_sample_map = _load_task_sample_map
-load_fsmol_task_sample_map = _load_task_sample_map
-score_protonet_episode = _score_protonet_manifest_episode
+# Module-lookup wrappers (not direct aliases) so that monkeypatching
+# fsmol_cliff.protonet_runner.XXX propagates to callers via these names.
+def load_protonet_model(*args, **kwargs):
+    return _pn.load_protonet_model(*args, **kwargs)
 
 
-def score_protonet_episode_with_model(
-    *,
-    model,
-    task_id: str,
-    sample_map: dict[str, object],
-    episode: dict,
-    batch_size: int = 320,
-    support_score_mode: str = "forward",
-) -> dict[str, float]:
-    return _score_protonet_manifest_episode(
-        model=model,
-        sample_map=sample_map,
-        episode=episode,
-        batch_size=batch_size,
-        support_score_mode=support_score_mode,
-    )
+def load_task_sample_map(*args, **kwargs):
+    return _pn.load_task_sample_map(*args, **kwargs)
 
 
-score_protonet_episode = score_protonet_episode_with_model
+load_fsmol_task_sample_map = load_task_sample_map
+
+
+def score_protonet_episode(*args, **kwargs):
+    return _pn.score_protonet_manifest_episode(*args, **kwargs)
 
 
 def evaluate_release_with_protonet(
@@ -287,6 +273,7 @@ def evaluate_release_with_protonet(
     max_episodes: int | None = None,
     device: str | None = None,
     support_score_mode: str = "forward",
+    calibration_mode: str = "identity",
 ) -> list[dict]:
     assay_context_cache: dict[str, dict] = {}
     sample_map_cache: dict[str, dict[str, object]] = {}
@@ -294,7 +281,7 @@ def evaluate_release_with_protonet(
     model = load_protonet_model(checkpoint_path=checkpoint_path, device=device)
 
     for split_type in split_types:
-        manifest_path = _resolve_manifest_path(release_dir, split_type=split_type, profile=profile)
+        manifest_path = resolve_manifest_path(release_dir, split_type=split_type, profile=profile)
         if not manifest_path.exists():
             continue
         frame = pd.read_parquet(manifest_path)
@@ -302,66 +289,27 @@ def evaluate_release_with_protonet(
             frame = frame[frame["task_id"].isin(task_ids)]
         if seeds is not None:
             frame = frame[frame["seed"].isin(seeds)]
-        for task_id in frame["task_id"].drop_duplicates().tolist():
-            assay_context = assay_context_cache.setdefault(task_id, _load_assay_context(release_dir, task_id, profile=profile))
+        if max_episodes is not None:
+            frame = frame.groupby(["task_id", "seed"], sort=False).head(max_episodes)
+        for episode in frame.to_dict(orient="records"):
+            task_id = episode["task_id"]
+            assay_context = assay_context_cache.setdefault(task_id, load_assay_context(release_dir, task_id, profile=profile))
             sample_map = sample_map_cache.setdefault(task_id, load_fsmol_task_sample_map(data_dir, task_id))
-            for seed in sorted(frame[frame["task_id"] == task_id]["seed"].drop_duplicates().tolist()):
-                seed_frame = frame[(frame["task_id"] == task_id) & (frame["seed"] == seed)]
-                if max_episodes is not None:
-                    seed_frame = seed_frame.head(max_episodes)
-                for episode in seed_frame.to_dict(orient="records"):
-                    episode_result = evaluate_episode_manifest(
-                            episode=episode,
-                            assay_context=assay_context,
-                            score_fn=lambda current_episode, *, current_task_id=task_id, current_sample_map=sample_map: score_protonet_episode(
-                                model=model,
-                                task_id=current_task_id,
-                                sample_map=current_sample_map,
-                                episode=current_episode,
-                                batch_size=batch_size,
-                                support_score_mode=support_score_mode,
-                            ),
-                        )
-                    episode_results.append({**episode_result, "profile": profile, "result_tier": result_tier})
+            episode_result = evaluate_episode_manifest(
+                    episode=episode,
+                    assay_context=assay_context,
+                    score_fn=lambda current_episode, *, current_sample_map=sample_map: score_protonet_episode(
+                        model=model,
+                        sample_map=current_sample_map,
+                        episode=current_episode,
+                        assay_context=assay_context,
+                        batch_size=batch_size,
+                        support_score_mode=support_score_mode,
+                        calibration_mode=calibration_mode,
+                    ),
+                )
+            episode_results.append({**episode_result, "profile": profile, "result_tier": result_tier})
 
     rows = summarize_task_metric_rows(episode_results)
     write_parquet(output_path, rows)
     return rows
-
-
-def _load_assay_context(release_dir: Path, task_id: str, *, profile: str = "strict") -> dict:
-    assay_dir = release_dir / "assays" / task_id
-    annotations = pd.read_parquet(assay_dir / "molecule_annotations.parquet").to_dict(orient="records")
-    pairs_path = _resolve_assay_path(assay_dir, stem="pairs", suffix=".jsonl", profile=profile)
-    cliff_pairs = []
-    noncliff_pairs = []
-    with pairs_path.open() as handle:
-        for line in handle:
-            pair = json.loads(line)
-            if pair["pair_type"] == "cliff":
-                cliff_pairs.append(pair)
-            else:
-                noncliff_pairs.append(pair)
-    records_by_id = {record["molecule_id"]: record for record in annotations}
-    labels = {record["molecule_id"]: int(record["label"]) for record in annotations}
-    return {
-        "records_by_id": records_by_id,
-        "labels": labels,
-        "cliff_pairs": cliff_pairs,
-        "noncliff_pairs": noncliff_pairs,
-        "anchor_to_hardnegs": json.loads(_resolve_assay_path(assay_dir, stem="anchor_to_hardnegs", suffix=".json", profile=profile).read_text())
-        if _resolve_assay_path(assay_dir, stem="anchor_to_hardnegs", suffix=".json", profile=profile).exists()
-        else {},
-    }
-
-
-def _resolve_manifest_path(release_dir: Path, *, split_type: str, profile: str) -> Path:
-    profile_path = release_dir / f"episodes_{split_type}_{profile}.parquet"
-    legacy_path = release_dir / f"episodes_{split_type}.parquet"
-    return profile_path if profile_path.exists() else legacy_path
-
-
-def _resolve_assay_path(assay_dir: Path, *, stem: str, suffix: str, profile: str) -> Path:
-    profile_path = assay_dir / f"{stem}_{profile}{suffix}"
-    legacy_path = assay_dir / f"{stem}{suffix}"
-    return profile_path if profile_path.exists() else legacy_path

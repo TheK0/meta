@@ -238,6 +238,163 @@ def test_build_release_command_writes_release_bundle(tmp_path: Path, monkeypatch
     assert (output_dir / "episodes_standard_strict.parquet").exists()
 
 
+def test_build_release_command_accepts_query_targeted_episode_variant(tmp_path: Path, monkeypatch) -> None:
+    data_dir = tmp_path / "fsmol"
+    task_dir = data_dir / "test"
+    task_list = tmp_path / "tasks.json"
+    output_dir = tmp_path / "release"
+
+    _write_jsonl_gz(
+        task_dir / "CHEMBL1.jsonl.gz",
+        [
+            {
+                "Assay_ID": "CHEMBL1",
+                "compound_id": f"p{i:02d}",
+                "Y": 1,
+                "Relation": "=",
+                "LogRegressionProperty": 8.0 if i <= 15 else 7.0,
+                "CanonicalIsomericSmiles": f"P{i:02d}",
+            }
+            for i in range(1, 26)
+        ]
+        + [
+            {
+                "Assay_ID": "CHEMBL1",
+                "compound_id": f"n{i:02d}",
+                "Y": 0,
+                "Relation": "=",
+                "LogRegressionProperty": 6.5 if i <= 15 else 6.4,
+                "CanonicalIsomericSmiles": f"N{i:02d}",
+            }
+            for i in range(1, 26)
+        ],
+    )
+    task_list.write_text(json.dumps({"test": ["CHEMBL1"]}))
+
+    monkeypatch.setattr(
+        "fsmol_cliff.assets.tanimoto_similarity",
+        lambda a, b: 0.9 if a and b and a[0] != b[0] else 0.1,
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "fsmol-cliff",
+            "build-release",
+            "--data-dir",
+            str(data_dir),
+            "--task-list-file",
+            str(task_list),
+            "--output-dir",
+            str(output_dir),
+            "--support-per-class",
+            "2",
+            "--query-per-class",
+            "4",
+            "--episodes-per-split",
+            "1",
+            "--seeds",
+            "[0]",
+            "--fsmol-data-version",
+            "fsmol-test",
+            "--adversarial-episode-variant",
+            "query_targeted_support_neg",
+        ],
+    )
+
+    assert main() == 0
+    payload = json.loads((output_dir / "benchmark_manifest.json").read_text())
+    assert payload["adversarial_episode_variant"] == "query_targeted_support_neg"
+    assert (output_dir / "episode_protocol_note.md").exists()
+
+
+def test_build_episode_variant_release_command_rewrites_release(tmp_path: Path, monkeypatch) -> None:
+    data_dir = tmp_path / "fsmol"
+    task_dir = data_dir / "test"
+    task_list = tmp_path / "tasks.json"
+    base_output_dir = tmp_path / "release_base"
+    variant_output_dir = tmp_path / "release_variant"
+
+    _write_jsonl_gz(
+        task_dir / "CHEMBL1.jsonl.gz",
+        [
+            {
+                "Assay_ID": "CHEMBL1",
+                "compound_id": f"p{i:02d}",
+                "Y": 1,
+                "Relation": "=",
+                "LogRegressionProperty": 8.0 if i <= 15 else 7.0,
+                "CanonicalIsomericSmiles": f"P{i:02d}",
+            }
+            for i in range(1, 26)
+        ]
+        + [
+            {
+                "Assay_ID": "CHEMBL1",
+                "compound_id": f"n{i:02d}",
+                "Y": 0,
+                "Relation": "=",
+                "LogRegressionProperty": 6.5 if i <= 15 else 6.4,
+                "CanonicalIsomericSmiles": f"N{i:02d}",
+            }
+            for i in range(1, 26)
+        ],
+    )
+    task_list.write_text(json.dumps({"test": ["CHEMBL1"]}))
+
+    monkeypatch.setattr(
+        "fsmol_cliff.assets.tanimoto_similarity",
+        lambda a, b: 0.9 if a and b and a[0] != b[0] else 0.1,
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "fsmol-cliff",
+            "build-release",
+            "--data-dir",
+            str(data_dir),
+            "--task-list-file",
+            str(task_list),
+            "--output-dir",
+            str(base_output_dir),
+            "--support-per-class",
+            "2",
+            "--query-per-class",
+            "4",
+            "--episodes-per-split",
+            "1",
+            "--seeds",
+            "[0]",
+            "--fsmol-data-version",
+            "fsmol-test",
+        ],
+    )
+    assert main() == 0
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "fsmol-cliff",
+            "build-episode-variant-release",
+            "--base-release-dir",
+            str(base_output_dir),
+            "--output-dir",
+            str(variant_output_dir),
+            "--profile",
+            "strict",
+            "--adversarial-episode-variant",
+            "query_targeted_support_neg",
+        ],
+    )
+
+    assert main() == 0
+    payload = json.loads((variant_output_dir / "benchmark_manifest.json").read_text())
+    assert payload["adversarial_episode_variant"] == "query_targeted_support_neg"
+    assert (variant_output_dir / "episode_protocol_note.md").exists()
+
+
 def test_evaluate_command_writes_metric_summary(tmp_path: Path, monkeypatch) -> None:
     input_file = tmp_path / "eval.json"
     output_file = tmp_path / "metrics.json"
@@ -538,6 +695,7 @@ def test_evaluate_command_can_run_release_mode_with_protonet_backend(tmp_path: P
     assert calls["release_dir"] == release_dir
     assert calls["data_dir"] == tmp_path / "fsmol"
     assert calls["checkpoint_path"] == tmp_path / "pn.pt"
+    assert calls["calibration_mode"] == "identity"
     saved = pd.read_parquet(output_file)
     assert set(saved["metric"]) >= {"q_psr"}
 
@@ -600,16 +758,19 @@ def test_evaluate_command_can_run_release_mode_with_protonet_backend(
     assert calls[0]["release_dir"] == release_dir
     assert calls[0]["data_dir"] == data_dir
     assert calls[0]["checkpoint_path"] == checkpoint_path
+    assert calls[0]["calibration_mode"] == "identity"
     saved = pd.read_parquet(output_file)
     assert set(saved["metric"]) == {"q_psr"}
 
 
-def test_evaluate_command_can_run_release_mode_with_protonet_backend(
+def test_evaluate_command_can_run_release_mode_with_query_only_protonet_calibration(
     tmp_path: Path, monkeypatch
 ) -> None:
     output_file = tmp_path / "task_results_protonet.parquet"
+    calls: list[dict] = []
 
     def fake_evaluate_release_with_protonet(**kwargs):
+        calls.append(kwargs)
         pd.DataFrame(
             [
                 {
@@ -647,11 +808,13 @@ def test_evaluate_command_can_run_release_mode_with_protonet_backend(
             str(output_file),
             "--backend",
             "protonet",
+            "--protonet-calibration-mode",
+            "query_only",
         ],
     )
 
     assert main() == 0
-    assert output_file.exists()
+    assert calls[0]["calibration_mode"] == "query_only"
 
 
 def test_aggregate_and_validate_commands_write_json_outputs(tmp_path: Path, monkeypatch) -> None:

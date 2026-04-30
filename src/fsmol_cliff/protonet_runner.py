@@ -1,15 +1,17 @@
 from __future__ import annotations
 
-import json
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
-import pandas as pd
 import torch
 
-from .evaluation import evaluate_episode_manifest, summarize_task_metric_rows
 from .fsmol_bridge import install_fs_mol_compat_patches
-from .io import write_parquet
+from .protonet_base import build_raw_score_bundle
+from .protonet_local_calibrated import (
+    apply_identity_local_calibration,
+    apply_query_only_local_calibration,
+)
 
 FSMolTask = None
 FSMolTaskSample = None
@@ -77,12 +79,22 @@ def load_protonet_model(
 ):
     trainer_cls = _get_protonet_trainer_class()
     resolved_device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    _warm_runtime_for_device(resolved_device)
     checkpoint = torch.load(checkpoint_path, map_location=resolved_device, weights_only=False)
     model = trainer_cls(checkpoint["model_config"])
     model.load_state_dict(checkpoint["model_state_dict"])
     model.to(resolved_device)
     model.eval()
     return model
+
+
+def _warm_runtime_for_device(device: torch.device | str) -> None:
+    device_type = device.type if isinstance(device, torch.device) else str(device)
+    if device_type != "mps":
+        return
+    # Force MPS stream/allocator initialization before checkpoint deserialization.
+    torch.ones(1, device=device)
+    torch.mps.empty_cache()
 
 
 def load_task_sample_map(data_dir: Path, task_id: str) -> dict[str, Any]:
@@ -116,6 +128,7 @@ def score_protonet_target_ids(
     model.eval()
     with torch.no_grad():
         for batch in pn_task_sample.batches:
+            batch = _coerce_protonet_batch_float_features(batch)
             probabilities = (
                 torch.nn.functional.softmax(model(batch), dim=1).detach().cpu().numpy()[:, 1].tolist()
             )
@@ -134,14 +147,36 @@ def score_protonet_target_ids(
     return scores
 
 
+def _coerce_protonet_batch_float_features(batch):
+    if not hasattr(batch, "support_features") or not hasattr(batch, "query_features"):
+        return batch
+
+    def _coerce_feature_block(feature_block):
+        fingerprints = getattr(feature_block, "fingerprints", None)
+        descriptors = getattr(feature_block, "descriptors", None)
+        return replace(
+            feature_block,
+            fingerprints=fingerprints.float() if hasattr(fingerprints, "float") else fingerprints,
+            descriptors=descriptors.float() if hasattr(descriptors, "float") else descriptors,
+        )
+
+    return replace(
+        batch,
+        support_features=_coerce_feature_block(batch.support_features),
+        query_features=_coerce_feature_block(batch.query_features),
+    )
+
+
 def score_protonet_manifest_episode(
     *,
     model,
     sample_map: dict[str, Any],
     episode: dict,
+    assay_context: dict | None = None,
     batch_size: int = 320,
     support_score_mode: str = "forward",
-) -> dict[str, float]:
+    calibration_mode: str = "identity",
+) -> dict[str, object]:
     task_id = episode["task_id"]
     support_ids = [*episode["support_pos_ids"], *episode["support_neg_ids"]]
     query_ids = [*episode["query_pos_ids"], *episode["query_neg_ids"]]
@@ -149,7 +184,7 @@ def score_protonet_manifest_episode(
     if support_score_mode != "forward":
         raise ValueError(f"Unsupported ProtoNet support_score_mode: {support_score_mode}")
 
-    scores = score_protonet_target_ids(
+    query_scores = score_protonet_target_ids(
         model=model,
         task_id=task_id,
         sample_map=sample_map,
@@ -165,90 +200,20 @@ def score_protonet_manifest_episode(
         target_ids=support_ids,
         batch_size=batch_size,
     )
-    return {**support_scores, **scores}
-
-
-def evaluate_release_with_protonet(
-    *,
-    release_dir: Path,
-    data_dir: Path,
-    checkpoint_path: Path,
-    output_path: Path,
-    split_types: tuple[str, ...] = ("standard", "adversarial"),
-    profile: str = "strict",
-    result_tier: str = "final",
-    task_ids: tuple[str, ...] | None = None,
-    seeds: tuple[int, ...] | None = None,
-    batch_size: int = 320,
-    max_episodes: int | None = None,
-    support_score_mode: str = "forward",
-    device: torch.device | None = None,
-) -> list[dict]:
-    model = load_protonet_model(checkpoint_path, device=device)
-    assay_context_cache: dict[str, dict] = {}
-    sample_map_cache: dict[str, dict[str, Any]] = {}
-    episode_results: list[dict] = []
-
-    for split_type in split_types:
-        manifest_path = _resolve_manifest_path(release_dir, split_type=split_type, profile=profile)
-        if not manifest_path.exists():
-            continue
-        frame = pd.read_parquet(manifest_path)
-        if task_ids is not None:
-            frame = frame[frame["task_id"].isin(task_ids)]
-        if seeds is not None:
-            frame = frame[frame["seed"].isin(seeds)]
-        if max_episodes is not None:
-            frame = frame.groupby(["task_id", "seed"], sort=False).head(max_episodes)
-        for episode in frame.to_dict(orient="records"):
-            task_id = episode["task_id"]
-            assay_context = assay_context_cache.setdefault(task_id, _load_assay_context(release_dir, task_id, profile=profile))
-            sample_map = sample_map_cache.setdefault(task_id, load_task_sample_map(data_dir, task_id))
-            episode_result = evaluate_episode_manifest(
-                    episode=episode,
-                    assay_context=assay_context,
-                    score_fn=lambda _, current_episode=episode, current_sample_map=sample_map: score_protonet_manifest_episode(
-                        model=model,
-                        sample_map=current_sample_map,
-                        episode=current_episode,
-                        batch_size=batch_size,
-                        support_score_mode=support_score_mode,
-                    ),
-                )
-            episode_results.append({**episode_result, "profile": profile, "result_tier": result_tier})
-
-    rows = summarize_task_metric_rows(episode_results)
-    write_parquet(output_path, rows)
-    return rows
-
-
-def _load_assay_context(release_dir: Path, task_id: str, *, profile: str = "strict") -> dict:
-    assay_dir = release_dir / "assays" / task_id
-    annotations = pd.read_parquet(assay_dir / "molecule_annotations.parquet").to_dict(orient="records")
-    cliff_pairs = []
-    noncliff_pairs = []
-    with _resolve_assay_path(assay_dir, stem="pairs", suffix=".jsonl", profile=profile).open() as handle:
-        for line in handle:
-            pair = json.loads(line)
-            if pair["pair_type"] == "cliff":
-                cliff_pairs.append(pair)
-            else:
-                noncliff_pairs.append(pair)
-    labels = {record["molecule_id"]: int(record["label"]) for record in annotations}
-    return {
-        "labels": labels,
-        "cliff_pairs": cliff_pairs,
-        "noncliff_pairs": noncliff_pairs,
-    }
-
-
-def _resolve_manifest_path(release_dir: Path, *, split_type: str, profile: str) -> Path:
-    profile_path = release_dir / f"episodes_{split_type}_{profile}.parquet"
-    legacy_path = release_dir / f"episodes_{split_type}.parquet"
-    return profile_path if profile_path.exists() else legacy_path
-
-
-def _resolve_assay_path(assay_dir: Path, *, stem: str, suffix: str, profile: str) -> Path:
-    profile_path = assay_dir / f"{stem}_{profile}{suffix}"
-    legacy_path = assay_dir / f"{stem}{suffix}"
-    return profile_path if profile_path.exists() else legacy_path
+    raw_scores = {**support_scores, **query_scores}
+    raw_bundle = build_raw_score_bundle(raw_scores=raw_scores)
+    if calibration_mode == "identity":
+        return apply_identity_local_calibration(
+            raw_scores=raw_bundle["raw_scores"],
+            raw_margins=raw_bundle["raw_margins"],
+        )
+    if calibration_mode == "query_only":
+        if assay_context is None:
+            raise ValueError("query_only ProtoNet calibration requires assay_context.")
+        return apply_query_only_local_calibration(
+            episode=episode,
+            assay_context=assay_context,
+            raw_scores=raw_bundle["raw_scores"],
+            raw_margins=raw_bundle["raw_margins"],
+        )
+    raise ValueError(f"Unsupported ProtoNet calibration_mode: {calibration_mode}")
