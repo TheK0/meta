@@ -19,10 +19,9 @@ from .adapters import AdapterSpec
 # instead of silently producing a broken patch.
 # ---------------------------------------------------------------------------
 _UPSTREAM_HASH_REGISTRY: dict[str, tuple[str, str]] = {
-    "fs_mol.modules.graph_feature_extractor": (
-        "7ddb60879a15c348de9d0080f53b7fc1699dd1683377afe38c2421c320195a0b",
-        "fs_mol/modules/graph_feature_extractor.py",
-    ),
+    # Order matters: leaf modules must be patched before modules that import them.
+    # gnn and graph_readout are leaf dependencies (only import torch_scatter).
+    # graph_feature_extractor imports gnn + graph_readout — must come after.
     "fs_mol.modules.gnn": (
         "40b162893b276f9642f071307169456872dc8b4a2e06f2c0ce5965974a7d1ca2",
         "fs_mol/modules/gnn.py",
@@ -30,6 +29,10 @@ _UPSTREAM_HASH_REGISTRY: dict[str, tuple[str, str]] = {
     "fs_mol.modules.graph_readout": (
         "7c16408d41dc10137efc6eb4576feee80de8ffd8677df1bdfa5eb07300d6c82b",
         "fs_mol/modules/graph_readout.py",
+    ),
+    "fs_mol.modules.graph_feature_extractor": (
+        "7ddb60879a15c348de9d0080f53b7fc1699dd1683377afe38c2421c320195a0b",
+        "fs_mol/modules/graph_feature_extractor.py",
     ),
     "fs_mol.models.protonet": (
         "28905e0729885bbb77af8365377b28d658bc3620f262046c005055034a6bb218",
