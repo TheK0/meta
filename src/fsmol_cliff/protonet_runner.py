@@ -8,6 +8,7 @@ import torch
 
 from .fsmol_bridge import install_fs_mol_compat_patches
 from .protonet_base import build_raw_score_bundle
+from .protonet_boundary_calibration import apply_boundary_uncertainty_calibration
 from .protonet_local_calibrated import (
     apply_identity_local_calibration,
     apply_query_only_local_calibration,
@@ -176,6 +177,9 @@ def score_protonet_manifest_episode(
     batch_size: int = 320,
     support_score_mode: str = "forward",
     calibration_mode: str = "identity",
+    calibration_top_k: int = 2,
+    calibration_uncertainty_scale: float = 0.1,
+    calibration_margin_floor: float = 0.1,
 ) -> dict[str, object]:
     task_id = episode["task_id"]
     support_ids = [*episode["support_pos_ids"], *episode["support_neg_ids"]]
@@ -215,5 +219,17 @@ def score_protonet_manifest_episode(
             assay_context=assay_context,
             raw_scores=raw_bundle["raw_scores"],
             raw_margins=raw_bundle["raw_margins"],
+        )
+    if calibration_mode == "boundary_uncertainty":
+        if assay_context is None:
+            raise ValueError("boundary_uncertainty ProtoNet calibration requires assay_context.")
+        return apply_boundary_uncertainty_calibration(
+            episode=episode,
+            assay_context=assay_context,
+            raw_scores=raw_bundle["raw_scores"],
+            raw_margins=raw_bundle["raw_margins"],
+            top_k=calibration_top_k,
+            uncertainty_scale=calibration_uncertainty_scale,
+            margin_floor=calibration_margin_floor,
         )
     raise ValueError(f"Unsupported ProtoNet calibration_mode: {calibration_mode}")

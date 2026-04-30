@@ -23,8 +23,9 @@ from .io import write_json
 from .metrics import c_bacc, nc_bacc, nc_psr, q_psr, scr, sq_psr, ss_q_psr, ss_scr, ss_sq_psr
 from .models import PairRecord
 from .pipeline import build_assay_asset_bundle
+from .protocol_compare import parse_comparisons, parse_named_paths, write_protocol_comparison_json
 from .fetch import write_source_manifest
-from .release import build_release_bundle
+from .release import ADVERSARIAL_EPISODE_VARIANTS, build_episode_variant_release, build_release_bundle
 from .reports import render_markdown_report
 from .runner import evaluate_release_with_protonet, evaluate_release_with_sklearn_baseline
 from .constants import EpisodeConfig, PROFILE_SPECS
@@ -71,6 +72,20 @@ def build_parser() -> argparse.ArgumentParser:
     build_release_parser.add_argument("--query-per-class", type=int, default=16)
     build_release_parser.add_argument("--episodes-per-split", type=int, default=400)
     build_release_parser.add_argument("--seeds", default="[0, 1, 2, 3, 4]")
+    build_release_parser.add_argument(
+        "--adversarial-episode-variant",
+        choices=sorted(ADVERSARIAL_EPISODE_VARIANTS),
+        default="baseline",
+    )
+    build_episode_variant_release_parser = subparsers.add_parser("build-episode-variant-release")
+    build_episode_variant_release_parser.add_argument("--base-release-dir", required=True)
+    build_episode_variant_release_parser.add_argument("--output-dir", required=True)
+    build_episode_variant_release_parser.add_argument("--profile", choices=profile_choices, required=True)
+    build_episode_variant_release_parser.add_argument(
+        "--adversarial-episode-variant",
+        choices=sorted(ADVERSARIAL_EPISODE_VARIANTS),
+        required=True,
+    )
 
     build_episodes_parser = subparsers.add_parser("build-episodes")
     build_episodes_parser.add_argument("--input", required=True)
@@ -91,10 +106,43 @@ def build_parser() -> argparse.ArgumentParser:
     evaluate_parser.add_argument("--batch-size", type=int, default=320)
     evaluate_parser.add_argument("--max-episodes", type=int)
     evaluate_parser.add_argument("--device")
+    evaluate_parser.add_argument(
+        "--protonet-calibration-mode",
+        choices=["identity", "query_only", "boundary_uncertainty"],
+        default="identity",
+    )
+    evaluate_parser.add_argument(
+        "--protonet-calibration-top-k",
+        type=int,
+        default=2,
+    )
+    evaluate_parser.add_argument(
+        "--protonet-calibration-uncertainty-scale",
+        type=float,
+        default=0.1,
+    )
+    evaluate_parser.add_argument(
+        "--protonet-calibration-margin-floor",
+        type=float,
+        default=0.1,
+    )
 
     aggregate_parser = subparsers.add_parser("aggregate")
     aggregate_parser.add_argument("--input", required=True)
     aggregate_parser.add_argument("--output", required=True)
+
+    protocol_compare_parser = subparsers.add_parser("protocol-compare")
+    protocol_compare_parser.add_argument("--inputs", nargs="+", required=True)
+    protocol_compare_parser.add_argument("--comparisons", nargs="+", required=True)
+    protocol_compare_parser.add_argument("--profile", choices=profile_choices, required=True)
+    protocol_compare_parser.add_argument(
+        "--result-tier",
+        choices=["final", "intermediate", "exploratory"],
+        default="final",
+    )
+    protocol_compare_parser.add_argument("--output", required=True)
+    protocol_compare_parser.add_argument("--bootstrap-iterations", type=int, default=10_000)
+    protocol_compare_parser.add_argument("--bootstrap-seed", type=int, default=0)
 
     validate_parser = subparsers.add_parser("validate-hypotheses")
     validate_parser.add_argument("--input", required=True)
@@ -146,6 +194,14 @@ def main() -> int:
             episodes_per_split=args.episodes_per_split,
             profile=args.profile,
             fsmol_data_version=args.fsmol_data_version,
+            adversarial_episode_variant=args.adversarial_episode_variant,
+        )
+    elif args.command == "build-episode-variant-release":
+        build_episode_variant_release(
+            base_release_dir=Path(args.base_release_dir),
+            output_dir=Path(args.output_dir),
+            profile=args.profile,
+            adversarial_episode_variant=args.adversarial_episode_variant,
         )
     elif args.command == "build-episodes":
         payload = json.loads(Path(args.input).read_text())
@@ -174,6 +230,10 @@ def main() -> int:
                     batch_size=args.batch_size,
                     max_episodes=args.max_episodes,
                     device=args.device,
+                    calibration_mode=args.protonet_calibration_mode,
+                    calibration_top_k=args.protonet_calibration_top_k,
+                    calibration_uncertainty_scale=args.protonet_calibration_uncertainty_scale,
+                    calibration_margin_floor=args.protonet_calibration_margin_floor,
                 )
             else:
                 evaluate_release_with_sklearn_baseline(
@@ -214,6 +274,16 @@ def main() -> int:
         else:
             payload = json.loads(input_path.read_text())
             write_json(Path(args.output), macro_mean(payload))
+    elif args.command == "protocol-compare":
+        write_protocol_comparison_json(
+            output_path=Path(args.output),
+            model_to_path=parse_named_paths(args.inputs),
+            comparisons=parse_comparisons(args.comparisons),
+            profile=args.profile,
+            result_tier=args.result_tier,
+            bootstrap_iterations=args.bootstrap_iterations,
+            bootstrap_seed=args.bootstrap_seed,
+        )
     elif args.command == "validate-hypotheses":
         payload = json.loads(Path(args.input).read_text())
         if "models" in payload:

@@ -874,6 +874,69 @@ def test_aggregate_and_validate_commands_write_json_outputs(tmp_path: Path, monk
     assert validate_payload["h3"]["accepted"] is True
 
 
+def test_evaluate_command_supports_boundary_uncertainty_parameters(
+    tmp_path: Path, monkeypatch
+) -> None:
+    output_file = tmp_path / "task_results.parquet"
+    calls: list[dict] = []
+
+    def fake_evaluate_release_with_protonet(**kwargs):
+        calls.append(kwargs)
+        pd.DataFrame(
+            [
+                {
+                    "task_id": "CHEMBL1",
+                    "seed": 0,
+                    "split_type": "standard",
+                    "metric": "q_psr",
+                    "score": 1.0,
+                    "coverage": 1.0,
+                    "num_episodes": 1,
+                    "num_valid_episodes": 1,
+                    "mean_num_valid_pairs_per_episode": 1.0,
+                }
+            ]
+        ).to_parquet(kwargs["output_path"], index=False)
+        return []
+
+    monkeypatch.setattr(
+        "fsmol_cliff.cli.evaluate_release_with_protonet",
+        fake_evaluate_release_with_protonet,
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "fsmol-cliff",
+            "evaluate",
+            "--release-dir",
+            str(tmp_path / "release"),
+            "--data-dir",
+            str(tmp_path / "fsmol"),
+            "--checkpoint",
+            str(tmp_path / "PN-Support64_best_validation.pt"),
+            "--output",
+            str(output_file),
+            "--backend",
+            "protonet",
+            "--protonet-calibration-mode",
+            "boundary_uncertainty",
+            "--protonet-calibration-top-k",
+            "4",
+            "--protonet-calibration-uncertainty-scale",
+            "0.3",
+            "--protonet-calibration-margin-floor",
+            "0.15",
+        ],
+    )
+
+    assert main() == 0
+    assert calls[0]["calibration_mode"] == "boundary_uncertainty"
+    assert calls[0]["calibration_top_k"] == 4
+    assert calls[0]["calibration_uncertainty_scale"] == 0.3
+    assert calls[0]["calibration_margin_floor"] == 0.15
+
+
 def test_validate_hypotheses_command_supports_model_set_analysis(tmp_path: Path, monkeypatch) -> None:
     validate_input = tmp_path / "validate_models.json"
     validate_output = tmp_path / "validate_models_out.json"

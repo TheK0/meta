@@ -707,3 +707,86 @@ def test_evaluate_release_with_protonet_reads_profile_specific_assets(
     assert output_path.exists()
     assert {row["profile"] for row in rows} == {"relaxed"}
     assert {row["result_tier"] for row in rows} == {"final"}
+
+
+def test_evaluate_release_with_protonet_supports_boundary_uncertainty_mode(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from fsmol_cliff.runner import evaluate_release_with_protonet
+
+    release_dir = tmp_path / "release"
+    assay_dir = release_dir / "assays" / "CHEMBL1"
+    assay_dir.mkdir(parents=True)
+
+    write_parquet(
+        assay_dir / "molecule_annotations.parquet",
+        [
+            {"molecule_id": "a1", "canonical_isomeric_smiles": "CCO", "label": 1, "r": 8.0, "scaffold_smiles": "CC"},
+            {"molecule_id": "n1", "canonical_isomeric_smiles": "CCN", "label": 0, "r": 6.0, "scaffold_smiles": "CC"},
+            {"molecule_id": "qa", "canonical_isomeric_smiles": "CCF", "label": 1, "r": 8.2, "scaffold_smiles": "CC"},
+            {"molecule_id": "qn", "canonical_isomeric_smiles": "CCC", "label": 0, "r": 6.1, "scaffold_smiles": "CC"},
+        ],
+    )
+
+    from fsmol_cliff.io import write_jsonl
+    write_jsonl(
+        assay_dir / "pairs.jsonl",
+        [
+            {
+                "anchor_id": "a1", "neg_id": "n1",
+                "sim": 0.92, "gap_abs": 1.5,
+                "same_scaffold": True, "pair_type": "cliff",
+                "anchor_label": 1, "neg_label": 0,
+            }
+        ],
+    )
+    (assay_dir / "anchor_to_hardnegs.json").write_text("{}")
+
+    episodes = [
+        {
+            "task_id": "CHEMBL1", "split_type": "standard", "seed": 0, "episode_id": 0,
+            "support_pos_ids": ["a1"], "support_neg_ids": ["n1"],
+            "query_pos_ids": ["qa"], "query_neg_ids": ["qn"],
+            "injected_pairs": [],
+        }
+    ]
+    write_parquet(release_dir / "episodes_standard_relaxed.parquet", episodes)
+    write_parquet(release_dir / "episodes_adversarial_relaxed.parquet", [])
+
+    captured_calibration_kwargs: dict[str, object] = {}
+
+    def fake_score_episode(*, calibration_mode, calibration_top_k,
+                           calibration_uncertainty_scale, calibration_margin_floor, **kwargs):
+        captured_calibration_kwargs.update({
+            "calibration_mode": calibration_mode,
+            "calibration_top_k": calibration_top_k,
+            "calibration_uncertainty_scale": calibration_uncertainty_scale,
+            "calibration_margin_floor": calibration_margin_floor,
+        })
+        return {"qa": 0.5, "qn": 0.49}
+
+    monkeypatch.setattr("fsmol_cliff.protonet_runner.load_protonet_model", lambda checkpoint_path, device=None: object())
+    monkeypatch.setattr("fsmol_cliff.protonet_runner.load_task_sample_map", lambda data_dir, task_id: {"dummy": object()})
+    monkeypatch.setattr("fsmol_cliff.protonet_runner.score_protonet_manifest_episode", fake_score_episode)
+
+    output_path = tmp_path / "task_results.parquet"
+    rows = evaluate_release_with_protonet(
+        release_dir=release_dir,
+        data_dir=tmp_path / "data",
+        checkpoint_path=tmp_path / "pn.pt",
+        output_path=output_path,
+        split_types=("standard",),
+        profile="relaxed",
+        result_tier="intermediate",
+        calibration_mode="boundary_uncertainty",
+        calibration_top_k=3,
+        calibration_uncertainty_scale=0.2,
+        calibration_margin_floor=0.05,
+    )
+
+    assert output_path.exists()
+    assert captured_calibration_kwargs["calibration_mode"] == "boundary_uncertainty"
+    assert captured_calibration_kwargs["calibration_top_k"] == 3
+    assert captured_calibration_kwargs["calibration_uncertainty_scale"] == 0.2
+    assert captured_calibration_kwargs["calibration_margin_floor"] == 0.05
+    assert {row["result_tier"] for row in rows} == {"intermediate"}

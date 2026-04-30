@@ -254,8 +254,8 @@ def load_task_sample_map(*args, **kwargs):
 load_fsmol_task_sample_map = load_task_sample_map
 
 
-def score_protonet_episode(*args, **kwargs):
-    return _pn.score_protonet_manifest_episode(*args, **kwargs)
+def score_protonet_episode(**kwargs):
+    return _pn.score_protonet_manifest_episode(**kwargs)
 
 
 def evaluate_release_with_protonet(
@@ -274,6 +274,9 @@ def evaluate_release_with_protonet(
     device: str | None = None,
     support_score_mode: str = "forward",
     calibration_mode: str = "identity",
+    calibration_top_k: int = 2,
+    calibration_uncertainty_scale: float = 0.1,
+    calibration_margin_floor: float = 0.1,
 ) -> list[dict]:
     assay_context_cache: dict[str, dict] = {}
     sample_map_cache: dict[str, dict[str, object]] = {}
@@ -306,6 +309,9 @@ def evaluate_release_with_protonet(
                         batch_size=batch_size,
                         support_score_mode=support_score_mode,
                         calibration_mode=calibration_mode,
+                        calibration_top_k=calibration_top_k,
+                        calibration_uncertainty_scale=calibration_uncertainty_scale,
+                        calibration_margin_floor=calibration_margin_floor,
                     ),
                 )
             episode_results.append({**episode_result, "profile": profile, "result_tier": result_tier})
