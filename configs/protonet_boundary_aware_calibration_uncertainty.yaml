@@ -1,0 +1,14 @@
+method: protonet_boundary_aware_calibration
+base_checkpoint: checkpoints/PN-Support64_best_validation.pt
+release_dir: outputs/fsmol_cliff_release_v4_covext_intermediate
+profile: relaxed_covext_10_10
+result_tier: intermediate
+calibration_mode: boundary_uncertainty
+grid:
+  top_k: [2, 4]
+  uncertainty_scale: [0.1, 0.2]
+  margin_floor: [0.1]
+selected_row:
+  top_k: 2
+  uncertainty_scale: 0.1
+  margin_floor: 0.1
