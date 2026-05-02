@@ -191,6 +191,20 @@ def _load_patched_module(module_name: str, path: Path) -> ModuleType:
     return module
 
 
+def _cuda_scatter_available() -> bool:
+    """Return True if native CUDA torch_scatter is usable (no compat patching needed)."""
+    try:
+        import torch
+
+        if not torch.cuda.is_available():
+            return False
+        import torch_scatter  # noqa: F401
+
+        return True
+    except ImportError:
+        return False
+
+
 def _apply_source_patches(module_name: str, source: str) -> str:
     if module_name == "fs_mol.modules.graph_feature_extractor":
         source = source.replace("from dataclasses import dataclass", "from dataclasses import dataclass, field")
@@ -206,14 +220,16 @@ def _apply_source_patches(module_name: str, source: str) -> str:
             "graph_feature_extractor_config: GraphFeatureExtractorConfig = field(default_factory=GraphFeatureExtractorConfig)",
         )
     elif module_name == "fs_mol.modules.gnn":
-        source = source.replace(
-            "from torch_scatter import scatter_sum, scatter_log_softmax, scatter_mean, scatter_max",
-            "from fsmol_cliff.torch_scatter_compat import "
-            "scatter_sum, scatter_log_softmax, scatter_mean, scatter_max",
-        )
+        if not _cuda_scatter_available():
+            source = source.replace(
+                "from torch_scatter import scatter_sum, scatter_log_softmax, scatter_mean, scatter_max",
+                "from fsmol_cliff.torch_scatter_compat import "
+                "scatter_sum, scatter_log_softmax, scatter_mean, scatter_max",
+            )
     elif module_name == "fs_mol.modules.graph_readout":
-        source = source.replace(
-            "from torch_scatter import scatter_softmax, scatter",
-            "from fsmol_cliff.torch_scatter_compat import scatter_softmax, scatter",
-        )
+        if not _cuda_scatter_available():
+            source = source.replace(
+                "from torch_scatter import scatter_softmax, scatter",
+                "from fsmol_cliff.torch_scatter_compat import scatter_softmax, scatter",
+            )
     return source
