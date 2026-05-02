@@ -34,8 +34,10 @@ def apply_boundary_uncertainty_calibration(
     effective_margin_scale = max(float(margin_floor), prototype_margin, 1e-6)
     dispersion_ratio = min(1.0, support_dispersion / effective_margin_scale)
 
-    support_neighbors = _build_support_neighbor_lookup(
-        assay_context=assay_context,
+    # Use cached neighbour index built once per assay (lazy, stored in assay_context).
+    molecule_index = _get_assay_molecule_index(assay_context)
+    support_neighbors = _lookup_support_neighbors(
+        molecule_index=molecule_index,
         support_labels=support_labels,
         top_k=max(1, int(top_k)),
     )
@@ -85,39 +87,61 @@ def _safe_pstdev(values: list[float]) -> float:
     return float(pstdev(values))
 
 
-def _build_support_neighbor_lookup(
-    *,
+# ---------------------------------------------------------------------------
+# Pre-indexed molecule neighbour lookup (built once per assay, reused across
+# all episodes for that assay).  Stored lazily in assay_context["_neighbor_index"].
+# ---------------------------------------------------------------------------
+
+def _get_assay_molecule_index(
     assay_context: Mapping[str, object],
-    support_labels: Mapping[str, int],
-    top_k: int,
-) -> dict[str, list[str]]:
-    support_ids = set(support_labels)
+) -> dict[str, list[tuple[float, str]]]:
+    """Return (or build once and cache) the full molecule → [(sim, neighbor_id), ...] index."""
+    cache_key = "_neighbor_index"
+    cached = assay_context.get(cache_key)  # type: ignore[union-attr]
+    if cached is not None:
+        return cached  # type: ignore[return-value]
     by_molecule: dict[str, list[tuple[float, str]]] = defaultdict(list)
     for pair in [*assay_context.get("cliff_pairs", []), *assay_context.get("noncliff_pairs", [])]:
         sim = float(pair.get("sim", 0.0))
         anchor_id = str(pair["anchor_id"])
         neg_id = str(pair["neg_id"])
-        if anchor_id in support_ids and neg_id in support_ids:
-            by_molecule[anchor_id].append((sim, neg_id))
-            by_molecule[neg_id].append((sim, anchor_id))
-        elif anchor_id in support_ids:
-            by_molecule[neg_id].append((sim, anchor_id))
-        elif neg_id in support_ids:
-            by_molecule[anchor_id].append((sim, neg_id))
-    ordered: dict[str, list[str]] = {}
-    for molecule_id, neighbors in by_molecule.items():
-        deduped: list[str] = []
-        seen: set[str] = set()
-        for _, neighbor_id in sorted(neighbors, reverse=True):
-            if neighbor_id in seen:
-                continue
-            seen.add(neighbor_id)
-            deduped.append(neighbor_id)
-            if len(deduped) >= top_k:
-                break
-        ordered[molecule_id] = deduped
-    return ordered
+        by_molecule[anchor_id].append((sim, neg_id))
+        by_molecule[neg_id].append((sim, anchor_id))
+    # Sort each list once; per-episode filtering does not re-sort.
+    index: dict[str, list[tuple[float, str]]] = {}
+    for mid, neighbors in by_molecule.items():
+        index[mid] = sorted(set(neighbors), reverse=True)
+    assay_context[cache_key] = index  # type: ignore[index]
+    return index
 
+
+def _lookup_support_neighbors(
+    *,
+    molecule_index: Mapping[str, list[tuple[float, str]]],
+    support_labels: Mapping[str, int],
+    top_k: int,
+) -> dict[str, list[str]]:
+    """Build per-molecule top-k support-only neighbour lists from the precomputed index."""
+    support_set = frozenset(support_labels)
+    result: dict[str, list[str]] = {}
+    for molecule_id, neighbors in molecule_index.items():
+        filtered: list[str] = []
+        for _, neighbor_id in neighbors:
+            if neighbor_id not in support_set:
+                continue
+            if neighbor_id in filtered:
+                continue
+            filtered.append(neighbor_id)
+            if len(filtered) >= top_k:
+                break
+        if filtered:
+            result[molecule_id] = filtered
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Neighbour disagreement (unchanged semantics)
+# ---------------------------------------------------------------------------
 
 def _neighbor_disagreement(
     *,
