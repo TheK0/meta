@@ -200,6 +200,7 @@ def score_protonet_manifest_episode(
     calibration_top_k: int = 2,
     calibration_uncertainty_scale: float = 0.1,
     calibration_margin_floor: float = 0.1,
+    case_net_fusion_lambda: float = 0.5,
 ) -> dict[str, object]:
     task_id = episode["task_id"]
     support_ids = [*episode["support_pos_ids"], *episode["support_neg_ids"]]
@@ -252,4 +253,21 @@ def score_protonet_manifest_episode(
             uncertainty_scale=calibration_uncertainty_scale,
             margin_floor=calibration_margin_floor,
         )
+    if calibration_mode == "case_net":
+        if assay_context is None:
+            raise ValueError("case_net calibration requires assay_context.")
+        from .case_runner import score_case_net_episode
+
+        calibrated = score_case_net_episode(
+            episode=episode,
+            assay_context=assay_context,
+            proto_scores=raw_bundle["raw_scores"],
+            fusion_lambda=case_net_fusion_lambda,
+        )
+        return {
+            "raw_scores": raw_bundle["raw_scores"],
+            "calibrated_scores": calibrated,
+            "raw_margins": raw_bundle["raw_margins"],
+            "calibrated_margins": {mid: s - 0.5 for mid, s in calibrated.items()},
+        }
     raise ValueError(f"Unsupported ProtoNet calibration_mode: {calibration_mode}")

@@ -108,7 +108,7 @@ def build_parser() -> argparse.ArgumentParser:
     evaluate_parser.add_argument("--device")
     evaluate_parser.add_argument(
         "--protonet-calibration-mode",
-        choices=["identity", "query_only", "boundary_uncertainty"],
+        choices=["identity", "query_only", "boundary_uncertainty", "case_net"],
         default="identity",
     )
     evaluate_parser.add_argument(
@@ -125,6 +125,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--protonet-calibration-margin-floor",
         type=float,
         default=0.1,
+    )
+    evaluate_parser.add_argument(
+        "--case-net-fusion-lambda",
+        type=float,
+        default=0.5,
     )
 
     aggregate_parser = subparsers.add_parser("aggregate")
@@ -234,6 +239,7 @@ def main() -> int:
                     calibration_top_k=args.protonet_calibration_top_k,
                     calibration_uncertainty_scale=args.protonet_calibration_uncertainty_scale,
                     calibration_margin_floor=args.protonet_calibration_margin_floor,
+                    case_net_fusion_lambda=args.case_net_fusion_lambda,
                 )
             else:
                 evaluate_release_with_sklearn_baseline(

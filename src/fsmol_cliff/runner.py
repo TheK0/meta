@@ -278,6 +278,7 @@ def evaluate_release_with_protonet(
     calibration_top_k: int = 2,
     calibration_uncertainty_scale: float = 0.1,
     calibration_margin_floor: float = 0.1,
+    case_net_fusion_lambda: float = 0.5,
 ) -> list[dict]:
     assay_context_cache: dict[str, dict] = {}
     sample_map_cache: dict[str, dict[str, object]] = {}
@@ -313,6 +314,7 @@ def evaluate_release_with_protonet(
                         calibration_top_k=calibration_top_k,
                         calibration_uncertainty_scale=calibration_uncertainty_scale,
                         calibration_margin_floor=calibration_margin_floor,
+                        case_net_fusion_lambda=case_net_fusion_lambda,
                     ),
                 )
             episode_results.append({**episode_result, "profile": profile, "result_tier": result_tier})
