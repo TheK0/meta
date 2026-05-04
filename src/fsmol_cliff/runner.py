@@ -9,6 +9,7 @@ import pandas as pd
 
 from .adapters import score_cliff_aware_sklearn_episode, score_official_baseline_episode, score_sklearn_episode
 from .evaluation import evaluate_episode_manifest, summarize_task_metric_rows
+from .fsmol_bridge import default_external_fsmol_root
 from .io import load_assay_context, resolve_assay_path, resolve_manifest_path, write_parquet
 from . import protonet_runner as _pn  # noqa: F401 — used via _pn.xxx lookups for monkeypatch compatibility
 
@@ -103,7 +104,7 @@ def build_maml_legacy_smoke_command(
         "-n",
         legacy_env_name,
         "env",
-        f"PYTHONPATH={Path(__file__).resolve().parents[1]}:/Volumes/macplus/project/meta/external/FS-Mol",
+        f"PYTHONPATH={Path(__file__).resolve().parents[1]}:{default_external_fsmol_root()}",
         "python",
         "-m",
         "fsmol_cliff.maml_legacy_runner",

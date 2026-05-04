@@ -68,6 +68,38 @@ def select_injected_pairs(
     )
 
 
+def select_injected_pairs_with_anchor_priority(
+    support_pos_ids: Sequence[str],
+    query_neg_ids: Sequence[str],
+    cliff_pairs: Sequence[PairRecord],
+    anchor_to_hardnegs: Mapping[str, Sequence[str]],
+    injection_count: int,
+    anchor_priority_order: Sequence[str],
+) -> list[PairRecord]:
+    ordered_pairs = _filter_pairs_by_hardneg_order(
+        support_pos_ids=support_pos_ids,
+        query_neg_ids=query_neg_ids,
+        cliff_pairs=cliff_pairs,
+        anchor_to_hardnegs=anchor_to_hardnegs,
+    )
+    anchor_order = [
+        anchor_id
+        for anchor_id in anchor_priority_order
+        if anchor_id in set(support_pos_ids)
+    ]
+    for anchor_id in sorted(set(support_pos_ids)):
+        if anchor_id not in anchor_order:
+            anchor_order.append(anchor_id)
+    return _select_injected_pairs(
+        support_pos_ids=support_pos_ids,
+        query_neg_ids=query_neg_ids,
+        cliff_pairs=ordered_pairs,
+        anchor_to_hardnegs=anchor_to_hardnegs,
+        injection_count=injection_count,
+        anchor_order=anchor_order,
+    )
+
+
 def build_adversarial_episode(
     support_pos_ids: Sequence[str],
     support_neg_ids: Sequence[str],
@@ -127,8 +159,13 @@ def _select_injected_pairs(
     cliff_pairs: Sequence[PairRecord],
     anchor_to_hardnegs: Mapping[str, Sequence[str]],
     injection_count: int,
+    anchor_order: Sequence[str] | None = None,
 ) -> list[PairRecord]:
-    support_anchor_order = sorted(dict.fromkeys(support_pos_ids))
+    support_anchor_order = (
+        list(dict.fromkeys(anchor_order))
+        if anchor_order is not None
+        else sorted(dict.fromkeys(support_pos_ids))
+    )
     query_neg_set = set(query_neg_ids)
     pair_lookup = _build_pair_lookup(cliff_pairs)
     adjacency = {
@@ -140,7 +177,7 @@ def _select_injected_pairs(
         for anchor_id in support_anchor_order
     }
 
-    @lru_cache(maxsize=None)
+    @lru_cache(maxsize=65536)
     def remaining_capacity(start_index: int, used_negs: frozenset[str]) -> int:
         remaining_adjacency = {
             anchor_id: [neg_id for neg_id in adjacency[anchor_id] if neg_id not in used_negs]

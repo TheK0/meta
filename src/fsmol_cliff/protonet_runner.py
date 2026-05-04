@@ -73,11 +73,31 @@ def _get_protonet_trainer_class():
     return PrototypicalNetworkTrainer
 
 
+# SHA256 of the frozen, trusted ProtoNet checkpoint.
+_TRUSTED_CHECKPOINT_HASH = (
+    "08cdc6256b3031c12a200864e284525458183be2402936c761c97754957db63c"
+)
+
+
 def load_protonet_model(
     checkpoint_path: Path,
     *,
     device: torch.device | None = None,
+    require_trusted: bool = True,
 ):
+    if require_trusted and checkpoint_path.exists():
+        import hashlib
+
+        actual_hash = hashlib.sha256(checkpoint_path.read_bytes()).hexdigest()
+        if actual_hash != _TRUSTED_CHECKPOINT_HASH:
+            raise RuntimeError(
+                f"ProtoNet checkpoint hash mismatch.\n"
+                f"  Expected: {_TRUSTED_CHECKPOINT_HASH}\n"
+                f"  Actual:   {actual_hash}\n"
+                f"The checkpoint may have been modified or corrupted.\n"
+                f"To load an untrusted checkpoint, pass require_trusted=False."
+            )
+
     trainer_cls = _get_protonet_trainer_class()
     resolved_device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
     _warm_runtime_for_device(resolved_device)

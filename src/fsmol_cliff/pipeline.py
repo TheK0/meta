@@ -6,7 +6,8 @@ from pathlib import Path
 from typing import Any
 
 from .assets import build_assay_assets
-from .chem import murcko_scaffold_smiles
+from .chem import murcko_scaffold_smiles, require_rdkit
+from .constants import DEFAULT_PROTOCOL_CONSTANTS
 from .io import write_json, write_jsonl, write_parquet
 
 
@@ -29,14 +30,15 @@ def build_assay_asset_bundle_for_profile(
     delta: float | None = None,
     hard_negative_pool_size: int | None = None,
 ) -> dict[str, Any]:
+    require_rdkit()
     records = load_task_records(task_file)
     assay_id = _assay_id_for_records(task_file, records)
     bundle = build_assay_assets(
         assay_id,
         records,
-        tau=tau if tau is not None else 0.85,
-        delta=delta if delta is not None else 1.0,
-        hard_negative_pool_size=hard_negative_pool_size if hard_negative_pool_size is not None else 32,
+        tau=tau if tau is not None else DEFAULT_PROTOCOL_CONSTANTS.similarity_threshold,
+        delta=delta if delta is not None else DEFAULT_PROTOCOL_CONSTANTS.activity_gap_threshold,
+        hard_negative_pool_size=hard_negative_pool_size if hard_negative_pool_size is not None else DEFAULT_PROTOCOL_CONSTANTS.hard_negative_pool_size,
     )
 
     molecules = [

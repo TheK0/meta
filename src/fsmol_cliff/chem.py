@@ -5,12 +5,31 @@ from functools import lru_cache
 import numpy as np
 
 
+class RdkitNotAvailableError(RuntimeError):
+    """Raised when RDKit is required but not importable."""
+
+
 def rdkit_is_available() -> bool:
     try:
         _load_rdkit()
     except ImportError:
         return False
     return True
+
+
+def require_rdkit() -> None:
+    """Fail-fast guard: raise if RDKit is not installed.
+
+    Call this at the entry point of any pipeline that depends on valid
+    molecular fingerprints, Tanimoto similarities, or scaffold extraction.
+    Without RDKit the benchmark can silently produce zero cliff pairs.
+    """
+    if not rdkit_is_available():
+        raise RdkitNotAvailableError(
+            "RDKit is required for CliffBench construction and evaluation.\n"
+            "Install with: pip install rdkit-pypi\n"
+            "Or: conda install -c rdkit rdkit"
+        )
 
 
 @lru_cache(maxsize=1)
