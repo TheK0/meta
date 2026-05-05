@@ -41,9 +41,11 @@ def evaluate_moleculeace_v2(
     delta: float = 1.0,
     activity_col: str = "y [pEC50/pKi]",
     n_bootstrap: int = 2000,
+    bootstrap_seed: int = 42,
 ) -> dict:
     """Run corrected pair-level diagnostics on all MoleculeACE targets."""
     require_rdkit()
+    np.random.seed(bootstrap_seed)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     csv_files = sorted(data_dir.glob("*.csv"))
@@ -56,11 +58,27 @@ def evaluate_moleculeace_v2(
         if row is not None:
             per_target.append(row)
 
-    summary = _build_summary_v2(per_target, n_bootstrap=n_bootstrap)
+    summary = _build_summary_v2(per_target, n_bootstrap=n_bootstrap, seed=bootstrap_seed)
 
-    # ---- Write outputs ----
+    # ---- Write outputs (with metadata) ----
+    metadata = {
+        "tau": tau,
+        "delta": delta,
+        "fingerprint": "Morgan_ECFP4_2048bit_radius2",
+        "activity_column": activity_col,
+        "bootstrap_iterations": n_bootstrap,
+        "bootstrap_seed": bootstrap_seed,
+        "moleculeace_source": "github.com/molML/MoleculeACE",
+        "moleculeace_commit": "7e6de0b (2025-02-15)",
+        "n_targets": len(per_target),
+        "aggregation": "macro_mean_with_metric_specific_eligibility",
+        "c_bacc_definition": "mean_over_cliff_pairs(0.5*(1(active_pred==1)+1(inactive_pred==0)))",
+        "nc_bacc_definition": "mean_over_highsim_noncliff_pairs(0.5*(1(active_pred==1)+1(inactive_pred==0)))",
+        "scr_definition": "fraction_of_highsim_pairs_with_same_binary_prediction",
+        "q_psr_definition": "fraction_of_highsim_pairs_with_active_score_greater_than_inactive_score",
+    }
     with open(output_dir / "moleculeace_results_v2.json", "w") as f:
-        json.dump({"per_target": per_target, "summary": summary}, f, indent=2)
+        json.dump({"metadata": metadata, "per_target": per_target, "summary": summary}, f, indent=2)
 
     df_tgt = pd.DataFrame(per_target)
     df_tgt.to_csv(output_dir / "moleculeace_per_target_v2.csv", index=False)
@@ -286,7 +304,7 @@ def _compute_pair_metrics_v2(
 # Aggregation
 # ---------------------------------------------------------------------------
 
-def _build_summary_v2(per_target: list[dict], n_bootstrap: int = 2000) -> dict:
+def _build_summary_v2(per_target: list[dict], n_bootstrap: int = 2000, seed: int = 42) -> dict:
     summary: dict = {}
     model_names = ["kNN", "RF"]
     metrics = [
@@ -411,4 +429,4 @@ if __name__ == "__main__":
     output_dir = Path(sys.argv[2]) if len(sys.argv) > 2 else Path(
         "outputs/moleculeace_validation"
     )
-    evaluate_moleculeace_v2(data_dir, output_dir)
+    evaluate_moleculeace_v2(data_dir, output_dir, bootstrap_seed=42)

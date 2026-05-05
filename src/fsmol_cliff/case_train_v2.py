@@ -82,17 +82,17 @@ def main() -> None:
         roc_auc_score,
     )
 
-    p_same, p_flip = predict_global_relations(head, X_val)
+    p_noncliff, p_cliff = predict_global_relations(head, X_val)
 
-    auprc = average_precision_score(y_val, p_flip)
-    auc = roc_auc_score(y_val, p_flip)
-    y_pred = (p_flip > 0.5).astype(np.int64)
+    auprc = average_precision_score(y_val, p_cliff)
+    auc = roc_auc_score(y_val, p_cliff)
+    y_pred = (p_cliff > 0.5).astype(np.int64)
     bacc = balanced_accuracy_score(y_val, y_pred)
 
     # Cliff probability by class
     cliff_mask = y_val == 1
-    p_cliff_on_cliff = p_flip[cliff_mask].mean() if cliff_mask.sum() > 0 else 0.0
-    p_cliff_on_noncliff = p_flip[~cliff_mask].mean() if (~cliff_mask).sum() > 0 else 0.0
+    p_cliff_on_cliff = p_cliff[cliff_mask].mean() if cliff_mask.sum() > 0 else 0.0
+    p_cliff_on_noncliff = p_cliff[~cliff_mask].mean() if (~cliff_mask).sum() > 0 else 0.0
 
     # ---- Phase 5: Report ----
     base_rate = float(y_val.mean())

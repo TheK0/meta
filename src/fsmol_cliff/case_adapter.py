@@ -1,3 +1,7 @@
+# CASE-Net v1: per-episode logistic-regression relation head (NO-GO).
+# Historical note: internal variable names p_same / p_flip are
+# retained for v1 code only.  The corrected v2 naming uses
+# p_cliff / p_noncliff.  See case_relation_trainer.py for v2.
 from __future__ import annotations
 
 from collections.abc import Mapping
