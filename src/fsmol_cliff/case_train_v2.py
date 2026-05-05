@@ -89,40 +89,42 @@ def main() -> None:
     y_pred = (p_flip > 0.5).astype(np.int64)
     bacc = balanced_accuracy_score(y_val, y_pred)
 
-    # Flip probability by class
+    # Cliff probability by class
     cliff_mask = y_val == 1
-    p_flip_cliff = p_flip[cliff_mask].mean() if cliff_mask.sum() > 0 else 0.0
-    p_flip_same = p_flip[~cliff_mask].mean() if (~cliff_mask).sum() > 0 else 0.0
+    p_cliff_on_cliff = p_flip[cliff_mask].mean() if cliff_mask.sum() > 0 else 0.0
+    p_cliff_on_noncliff = p_flip[~cliff_mask].mean() if (~cliff_mask).sum() > 0 else 0.0
 
     # ---- Phase 5: Report ----
+    base_rate = float(y_val.mean())
     report = {
         "train_pairs": int(len(X_train)),
-        "train_flip_ratio": float(y_train.mean()),
+        "train_cliff_ratio": float(y_train.mean()),
         "val_pairs": int(len(X_val)),
-        "val_flip_ratio": float(y_val.mean()),
+        "val_cliff_ratio": base_rate,
         "auprc": float(auprc),
+        "base_rate": base_rate,
         "auc_roc": float(auc),
         "balanced_accuracy": float(bacc),
-        "p_flip_mean_cliff": float(p_flip_cliff),
-        "p_flip_mean_same": float(p_flip_same),
-        "gate_auprc": bool(auprc > 0.5),
-        "gate_bacc": bool(bacc > 0.60),
+        "p_cliff_mean_cliff": float(p_cliff_on_cliff),
+        "p_cliff_mean_noncliff": float(p_cliff_on_noncliff),
+        "gate_auprc_above_base": bool(auprc > base_rate),
+        "gate_bacc_above_060": bool(bacc > 0.60),
     }
-    report["gate_passed"] = bool(report["gate_auprc"] and report["gate_bacc"])
+    report["gate_passed"] = bool(report["gate_auprc_above_base"] and report["gate_bacc_above_060"])
 
     print(f"\n{'='*50}")
     print(f"PAIR-LEVEL VALIDATION RESULTS")
     print(f"{'='*50}")
-    print(f"  Training pairs:    {len(X_train)} (flip ratio: {y_train.mean():.3f})")
-    print(f"  Validation pairs:  {len(X_val)} (flip ratio: {y_val.mean():.3f})")
-    print(f"  AUPRC:             {auprc:.4f}  (base rate: {y_val.mean():.4f})")
-    print(f"  AUC-ROC:           {auc:.4f}")
-    print(f"  Balanced Accuracy: {bacc:.4f}")
-    print(f"  p_flip on cliffs:  {p_flip_cliff:.4f}")
-    print(f"  p_flip on same:    {p_flip_same:.4f}")
-    print(f"  Gate AUPRC>base:   {report['gate_auprc']}")
-    print(f"  Gate BAcc>0.60:    {report['gate_bacc']}")
-    print(f"  GATE PASSED:       {report['gate_passed']}")
+    print(f"  Training pairs:    {len(X_train)} (cliff ratio: {y_train.mean():.3f})")
+    print(f"  Validation pairs:  {len(X_val)} (cliff ratio: {y_val.mean():.3f})")
+    print(f"  AUPRC:              {auprc:.4f}  (base rate: {y_val.mean():.4f})")
+    print(f"  AUC-ROC:            {auc:.4f}")
+    print(f"  Balanced Accuracy:  {bacc:.4f}")
+    print(f"  p_cliff on cliffs:  {p_cliff_on_cliff:.4f}")
+    print(f"  p_cliff on noncliffs: {p_cliff_on_noncliff:.4f}")
+    print(f"  Gate AUPRC>base:    {report['gate_auprc_above_base']}")
+    print(f"  Gate BAcc>0.60:     {report['gate_bacc_above_060']}")
+    print(f"  GATE PASSED:        {report['gate_passed']}")
 
     with open(output_dir / "pair_level_report.json", "w") as f:
         json.dump(report, f, indent=2)

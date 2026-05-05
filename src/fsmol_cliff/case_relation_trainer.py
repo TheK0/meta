@@ -1,9 +1,16 @@
-"""CASE-Net v2: Fast pretrained cross-task relation head.
+"""CASE-Net v2: Pretrained cross-task cliff-vs-noncliff relation head (NO-GO).
 
-Builds a global relation dataset by directly sampling active-inactive
-pairs from raw FS-Mol task files (skips the full assay pipeline).
-Trains a RandomForest to distinguish cliff (gap >= delta) from noncliff
-(gap < delta) high-similarity pairs.
+Builds a global relation dataset by sampling active-inactive pairs from
+raw FS-Mol train/valid task files.  Trains a RandomForest to distinguish
+cliff (gap >= delta) from highsim_noncliff (gap < delta) pairs.
+
+Label convention (v2, corrected):
+  y = 1: cliff
+  y = 0: highsim_noncliff
+
+Historical note: earlier iterations used "same" / "flip" naming inherited
+from an incorrect assumption that highsim_noncliff pairs could be concordant.
+Those names are retired.  All variables use cliff / noncliff.
 """
 
 from __future__ import annotations
@@ -38,7 +45,7 @@ def build_global_relation_dataset(
     """Sample active-inactive pairs, compute Tanimoto, label cliff/noncliff.
 
     Returns (X, y): X (n_pairs, ~4104) float32, y (n_pairs,) int64.
-    y: 0 = noncliff (smooth, gap < delta), 1 = cliff (sharp, gap >= delta).
+    y: 0 = highsim_noncliff (gap < delta), 1 = cliff (gap >= delta).
     """
     require_rdkit()
 
@@ -220,6 +227,7 @@ def train_global_relation_head(X: np.ndarray, y: np.ndarray) -> object:
 def predict_global_relations(
     head: object, X: np.ndarray,
 ) -> tuple[np.ndarray, np.ndarray]:
+    """Return (p_noncliff, p_cliff) probabilities for each pair."""
     proba = head.predict_proba(X)
     if proba.shape[1] == 2:
         return proba[:, 0], proba[:, 1]
