@@ -8,7 +8,8 @@ from fsmol_cliff.fsmol_bridge import default_external_fsmol_root, load_callable_
 
 def test_default_external_fsmol_root_matches_local_reference_checkout() -> None:
     root = default_external_fsmol_root()
-    assert root.name == "FS-Mol"
+    assert root.exists()
+    assert (root / "fs_mol").exists()
 
 
 def test_resolve_script_path_points_to_existing_official_script() -> None:

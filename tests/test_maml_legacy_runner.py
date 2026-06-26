@@ -32,7 +32,7 @@ def test_build_maml_legacy_smoke_command_contains_expected_env_and_paths() -> No
     assert "2" in command
     assert "--profile" in command
     assert "relaxed" in command
-    assert "/tmp/checkpoints/maml.pkl" in command
+    assert str(Path("/tmp/checkpoints/maml.pkl")) in command
 
 
 def test_convert_legacy_maml_outputs_to_episode_results_maps_scores_back_into_main_schema() -> None:

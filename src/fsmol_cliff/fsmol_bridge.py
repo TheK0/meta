@@ -50,19 +50,35 @@ _REQUIRED_PATCHED_SYMBOLS: dict[str, list[str]] = {
 
 
 def default_external_fsmol_root() -> Path:
+    repo_root = Path(__file__).resolve().parents[2]
+    candidates: list[Path] = []
+
     override = os.environ.get("FSMOL_EXTERNAL_ROOT")
     if override:
-        path = Path(override)
-    else:
-        path = Path("/Volumes/macplus/project/meta/external/FS-Mol")
-    if not path.exists():
-        raise FileNotFoundError(
-            f"FS-Mol external repository not found at: {path}\n"
-            f"Set the FSMOL_EXTERNAL_ROOT environment variable to point to "
-            f"a local checkout of the FS-Mol repository.\n"
-            f"  export FSMOL_EXTERNAL_ROOT=/path/to/FS-Mol"
-        )
-    return path
+        candidates.append(Path(override))
+
+    candidates.extend(
+        [
+            repo_root / "src",
+            repo_root / "external" / "FS-Mol",
+            repo_root.parent / "FS-Mol",
+            repo_root.parent / "external" / "FS-Mol",
+            Path("/Volumes/macplus/project/meta/external/FS-Mol"),
+        ]
+    )
+
+    for path in candidates:
+        if path.exists():
+            return path
+
+    searched = "\n".join(f"  - {path}" for path in candidates)
+    raise FileNotFoundError(
+        "FS-Mol external repository not found.\n"
+        "Searched the following locations:\n"
+        f"{searched}\n"
+        "Set the FSMOL_EXTERNAL_ROOT environment variable to point to "
+        "a local checkout of the FS-Mol repository."
+    )
 
 
 def resolve_script_path(spec: AdapterSpec, root: Path | None = None) -> Path:
@@ -165,6 +181,9 @@ def install_fs_mol_compat_patches(root: Path | None = None) -> None:
     vendor_mat_src = Path(__file__).resolve().parents[2] / "vendor" / "MAT" / "src"
     if vendor_mat_src.exists() and str(vendor_mat_src) not in sys.path:
         sys.path.insert(0, str(vendor_mat_src))
+    bundled_fallback_root = Path(__file__).resolve().parents[2] / "src"
+    if base == bundled_fallback_root:
+        return
 
     for module_name, (expected_hash, relative_path) in _UPSTREAM_HASH_REGISTRY.items():
         if module_name in sys.modules:

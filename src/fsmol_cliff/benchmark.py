@@ -26,7 +26,10 @@ def resolve_git_commit(checkout_root: Path | None) -> str | None:
 def resolve_external_fsmol_commit(fsmol_checkout_root: Path | None = None) -> str | None:
     if fsmol_checkout_root is not None:
         return resolve_git_commit(fsmol_checkout_root)
-    default_root = default_external_fsmol_root()
+    try:
+        default_root = default_external_fsmol_root()
+    except FileNotFoundError:
+        return None
     return resolve_git_commit(default_root)
 
 

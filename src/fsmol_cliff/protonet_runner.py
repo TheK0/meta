@@ -43,27 +43,37 @@ def _ensure_fs_mol_symbols() -> None:
     ):
         return
 
-    install_fs_mol_compat_patches()
+    if FSMolTask is None or RichPath is None:
+        install_fs_mol_compat_patches()
 
-    from dpu_utils.utils import RichPath as imported_rich_path
-    from fs_mol.data.fsmol_task import FSMolTask as imported_task
-    from fs_mol.data.fsmol_task import FSMolTaskSample as imported_task_sample
-    from fs_mol.data.protonet import get_protonet_batcher as imported_batcher
-    from fs_mol.data.protonet import task_sample_to_pn_task_sample as imported_converter
-    from fs_mol.utils.torch_utils import torchify as imported_torchify
+        from dpu_utils.utils import RichPath as imported_rich_path
+        from fs_mol.data.fsmol_task import FSMolTask as imported_task
 
-    if FSMolTask is None:
-        FSMolTask = imported_task
+        if FSMolTask is None:
+            FSMolTask = imported_task
+        if RichPath is None:
+            RichPath = imported_rich_path
+
     if FSMolTaskSample is None:
+        install_fs_mol_compat_patches()
+
+        from fs_mol.data.fsmol_task import FSMolTaskSample as imported_task_sample
+
         FSMolTaskSample = imported_task_sample
-    if RichPath is None:
-        RichPath = imported_rich_path
-    if get_protonet_batcher is None:
-        get_protonet_batcher = imported_batcher
-    if task_sample_to_pn_task_sample is None:
-        task_sample_to_pn_task_sample = imported_converter
-    if torchify is None:
-        torchify = imported_torchify
+
+    if get_protonet_batcher is None or task_sample_to_pn_task_sample is None or torchify is None:
+        install_fs_mol_compat_patches()
+
+        from fs_mol.data.protonet import get_protonet_batcher as imported_batcher
+        from fs_mol.data.protonet import task_sample_to_pn_task_sample as imported_converter
+        from fs_mol.utils.torch_utils import torchify as imported_torchify
+
+        if get_protonet_batcher is None:
+            get_protonet_batcher = imported_batcher
+        if task_sample_to_pn_task_sample is None:
+            task_sample_to_pn_task_sample = imported_converter
+        if torchify is None:
+            torchify = imported_torchify
 
 
 def _get_protonet_trainer_class():
