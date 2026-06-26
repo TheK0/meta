@@ -113,9 +113,11 @@ def test_cli_exposes_expected_top_level_subcommands() -> None:
         "audit-attrition",
         "build-assets",
         "build-release",
+        "build-episode-variant-release",
         "build-episodes",
         "evaluate",
         "aggregate",
+        "protocol-compare",
         "validate-hypotheses",
     }
 

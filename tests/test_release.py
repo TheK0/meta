@@ -7,7 +7,7 @@ from pathlib import Path
 import pandas as pd
 
 from fsmol_cliff.constants import EpisodeConfig, PROFILE_SPECS, RELAXED_PROFILE
-from fsmol_cliff.release import build_release_bundle
+from fsmol_cliff.release import build_episode_variant_release, build_release_bundle
 
 
 def _write_task(path: Path, records: list[dict]) -> None:
@@ -44,6 +44,16 @@ def _eligible_records() -> list[dict]:
     return records
 
 
+def _normalize(value):
+    if hasattr(value, "tolist"):
+        return _normalize(value.tolist())
+    if isinstance(value, list):
+        return [_normalize(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _normalize(item) for key, item in value.items()}
+    return value
+
+
 def _small_records() -> list[dict]:
     records = []
     for index in range(1, 6):
@@ -68,6 +78,20 @@ def _small_records() -> list[dict]:
             }
         )
     return records
+
+
+def _patch_release_test_chemistry(monkeypatch, fake_similarity) -> None:
+    monkeypatch.setattr("fsmol_cliff.assets.tanimoto_similarity", fake_similarity)
+    monkeypatch.setattr(
+        "fsmol_cliff.release.default_benchmark_manifest",
+        lambda: {
+            "profiles": {
+                "strict": PROFILE_SPECS["strict"].to_dict(),
+                "relaxed": PROFILE_SPECS["relaxed"].to_dict(),
+            },
+            "built_profiles": [],
+        },
+    )
 
 
 def test_profile_specs_register_auxiliary_relaxed_coverage_extension_profiles() -> None:
@@ -103,7 +127,7 @@ def test_build_release_bundle_adds_auxiliary_profile_to_release_manifest(tmp_pat
             return None
         return 0.9 if smiles_a[0] != smiles_b[0] else 0.1
 
-    monkeypatch.setattr("fsmol_cliff.assets.tanimoto_similarity", fake_similarity)
+    _patch_release_test_chemistry(monkeypatch, fake_similarity)
 
     build_release_bundle(
         data_dir=data_dir,
@@ -161,7 +185,7 @@ def test_build_release_bundle_writes_profile_aware_task_lists_and_manifests(
             return 0.9
         return 0.1
 
-    monkeypatch.setattr("fsmol_cliff.assets.tanimoto_similarity", fake_similarity)
+    _patch_release_test_chemistry(monkeypatch, fake_similarity)
 
     strict_release = build_release_bundle(
         data_dir=data_dir,
@@ -239,3 +263,160 @@ def test_build_release_bundle_writes_profile_aware_task_lists_and_manifests(
     assert set(relaxed_task_summaries["assay_id"]) == {"CHEMBL_ELIGIBLE", "CHEMBL_SMALL"}
     assert strict_task_summaries["anchor_to_hardnegs"].map(type).eq(str).all()
     assert relaxed_task_summaries["anchor_to_hardnegs"].map(type).eq(str).all()
+
+
+def test_build_release_bundle_can_write_query_targeted_episode_variant(
+    tmp_path: Path, monkeypatch
+) -> None:
+    data_dir = tmp_path / "fsmol"
+    test_dir = data_dir / "test"
+    baseline_output_dir = tmp_path / "release_baseline"
+    variant_output_dir = tmp_path / "release_variant"
+
+    _write_task(test_dir / "CHEMBL_ELIGIBLE.jsonl.gz", _eligible_records())
+
+    def fake_similarity(smiles_a: str | None, smiles_b: str | None) -> float | None:
+        if not smiles_a or not smiles_b:
+            return None
+
+        def positive_index(smiles: str) -> int | None:
+            return len(smiles) if set(smiles) == {"C"} else None
+
+        def negative_index(smiles: str) -> int | None:
+            if not smiles.endswith("N"):
+                return None
+            if set(smiles[:-1]) <= {"C"}:
+                return len(smiles)
+            return None
+
+        pos_index = positive_index(smiles_a)
+        neg_index = negative_index(smiles_b)
+        if pos_index is None or neg_index is None:
+            pos_index = positive_index(smiles_b)
+            neg_index = negative_index(smiles_a)
+        if pos_index is None or neg_index is None:
+            return 0.1
+        if pos_index <= 15 and neg_index <= 15 and abs(pos_index - neg_index) <= 1:
+            return 0.9
+        if 16 <= pos_index <= 25 and pos_index == neg_index:
+            return 0.9
+        return 0.1
+
+    _patch_release_test_chemistry(monkeypatch, fake_similarity)
+
+    build_release_bundle(
+        data_dir=data_dir,
+        output_dir=baseline_output_dir,
+        episode_config=EpisodeConfig(support_per_class=2, query_per_class=4),
+        seeds=[0],
+        episodes_per_split=1,
+        profile="relaxed",
+        fsmol_data_version="fsmol-test",
+    )
+    build_release_bundle(
+        data_dir=data_dir,
+        output_dir=variant_output_dir,
+        episode_config=EpisodeConfig(support_per_class=2, query_per_class=4),
+        seeds=[0],
+        episodes_per_split=1,
+        profile="relaxed",
+        fsmol_data_version="fsmol-test",
+        adversarial_episode_variant="query_targeted_support_neg",
+    )
+
+    benchmark_manifest = json.loads((variant_output_dir / "benchmark_manifest.json").read_text())
+    assert benchmark_manifest["adversarial_episode_variant"] == "query_targeted_support_neg"
+
+    note = (variant_output_dir / "episode_protocol_note.md").read_text()
+    assert "Query-Targeted Support Negatives" in note
+
+    baseline_standard = pd.read_parquet(baseline_output_dir / "episodes_standard_relaxed.parquet").to_dict(orient="records")
+    variant_standard = pd.read_parquet(variant_output_dir / "episodes_standard_relaxed.parquet").to_dict(orient="records")
+    assert [_normalize(row) for row in variant_standard] == [_normalize(row) for row in baseline_standard]
+
+    baseline_episode = pd.read_parquet(
+        baseline_output_dir / "episodes_adversarial_relaxed.parquet"
+    ).to_dict(orient="records")[0]
+    variant_episode = pd.read_parquet(
+        variant_output_dir / "episodes_adversarial_relaxed.parquet"
+    ).to_dict(orient="records")[0]
+
+    for key in ("support_pos_ids", "query_pos_ids", "query_neg_ids", "injected_pairs"):
+        assert _normalize(variant_episode[key]) == _normalize(baseline_episode[key])
+    assert _normalize(variant_episode["support_neg_ids"]) != _normalize(baseline_episode["support_neg_ids"])
+
+
+def test_build_episode_variant_release_rewrites_only_adversarial_manifests(
+    tmp_path: Path, monkeypatch
+) -> None:
+    data_dir = tmp_path / "fsmol"
+    test_dir = data_dir / "test"
+    base_output_dir = tmp_path / "release_base"
+    variant_output_dir = tmp_path / "release_variant"
+
+    _write_task(test_dir / "CHEMBL_ELIGIBLE.jsonl.gz", _eligible_records())
+
+    def fake_similarity(smiles_a: str | None, smiles_b: str | None) -> float | None:
+        if not smiles_a or not smiles_b:
+            return None
+
+        def positive_index(smiles: str) -> int | None:
+            return len(smiles) if set(smiles) == {"C"} else None
+
+        def negative_index(smiles: str) -> int | None:
+            if not smiles.endswith("N"):
+                return None
+            if set(smiles[:-1]) <= {"C"}:
+                return len(smiles)
+            return None
+
+        pos_index = positive_index(smiles_a)
+        neg_index = negative_index(smiles_b)
+        if pos_index is None or neg_index is None:
+            pos_index = positive_index(smiles_b)
+            neg_index = negative_index(smiles_a)
+        if pos_index is None or neg_index is None:
+            return 0.1
+        if pos_index <= 15 and neg_index <= 15 and abs(pos_index - neg_index) <= 1:
+            return 0.9
+        if 16 <= pos_index <= 25 and pos_index == neg_index:
+            return 0.9
+        return 0.1
+
+    _patch_release_test_chemistry(monkeypatch, fake_similarity)
+
+    build_release_bundle(
+        data_dir=data_dir,
+        output_dir=base_output_dir,
+        episode_config=EpisodeConfig(support_per_class=2, query_per_class=4),
+        seeds=[0],
+        episodes_per_split=1,
+        profile="relaxed",
+        fsmol_data_version="fsmol-test",
+    )
+
+    build_episode_variant_release(
+        base_release_dir=base_output_dir,
+        output_dir=variant_output_dir,
+        profile="relaxed",
+        adversarial_episode_variant="query_targeted_support_neg",
+    )
+
+    base_manifest = json.loads((base_output_dir / "benchmark_manifest.json").read_text())
+    variant_manifest = json.loads((variant_output_dir / "benchmark_manifest.json").read_text())
+    assert variant_manifest["profiles"] == base_manifest["profiles"]
+    assert variant_manifest["built_profiles"] == base_manifest["built_profiles"]
+    assert variant_manifest["adversarial_episode_variant"] == "query_targeted_support_neg"
+
+    base_standard = pd.read_parquet(base_output_dir / "episodes_standard_relaxed.parquet").to_dict(orient="records")
+    variant_standard = pd.read_parquet(variant_output_dir / "episodes_standard_relaxed.parquet").to_dict(orient="records")
+    assert [_normalize(row) for row in variant_standard] == [_normalize(row) for row in base_standard]
+
+    base_adversarial = pd.read_parquet(base_output_dir / "episodes_adversarial_relaxed.parquet").to_dict(orient="records")[0]
+    variant_adversarial = pd.read_parquet(variant_output_dir / "episodes_adversarial_relaxed.parquet").to_dict(orient="records")[0]
+    for key in ("support_pos_ids", "query_pos_ids", "query_neg_ids", "injected_pairs"):
+        assert _normalize(variant_adversarial[key]) == _normalize(base_adversarial[key])
+    assert _normalize(variant_adversarial["support_neg_ids"]) != _normalize(base_adversarial["support_neg_ids"])
+
+    assert (variant_output_dir / "assays" / "CHEMBL_ELIGIBLE" / "molecule_annotations.parquet").exists()
+    assert "build-episode-variant-release" in (variant_output_dir / "release_reproducibility.md").read_text()
