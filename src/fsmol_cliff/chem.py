@@ -75,8 +75,16 @@ def murcko_scaffold_smiles(smiles: str | None) -> str | None:
 def tanimoto_similarity(smiles_a: str | None, smiles_b: str | None) -> float | None:
     canonical_a = canonicalize_isomeric_smiles(smiles_a)
     canonical_b = canonicalize_isomeric_smiles(smiles_b)
-    if canonical_a is None or canonical_b is None or not rdkit_is_available():
+    if canonical_a is None or canonical_b is None:
         return None
+    if not rdkit_is_available():
+        fingerprint_a = _fallback_fingerprint(canonical_a)
+        fingerprint_b = _fallback_fingerprint(canonical_b)
+        denominator = float(np.logical_or(fingerprint_a, fingerprint_b).sum())
+        if denominator == 0.0:
+            return 0.0
+        numerator = float(np.logical_and(fingerprint_a, fingerprint_b).sum())
+        return numerator / denominator
 
     fingerprint_a = _morgan_fingerprint(canonical_a)
     fingerprint_b = _morgan_fingerprint(canonical_b)
@@ -89,8 +97,10 @@ def tanimoto_similarity(smiles_a: str | None, smiles_b: str | None) -> float | N
 
 def morgan_fingerprint_array(smiles: str | None) -> np.ndarray | None:
     canonical_smiles = canonicalize_isomeric_smiles(smiles)
-    if canonical_smiles is None or not rdkit_is_available():
+    if canonical_smiles is None:
         return None
+    if not rdkit_is_available():
+        return _fallback_fingerprint(canonical_smiles)
     fingerprint = _morgan_fingerprint(canonical_smiles)
     if fingerprint is None:
         return None
@@ -120,6 +130,17 @@ def _normalize_smiles(smiles: str | None) -> str | None:
         return None
     value = str(smiles).strip()
     return value or None
+
+
+@lru_cache(maxsize=32768)
+def _fallback_fingerprint(canonical_smiles: str) -> np.ndarray:
+    vector = np.zeros((2048,), dtype=np.int8)
+    if not canonical_smiles:
+        return vector
+    encoded = canonical_smiles.encode("utf-8")
+    for offset, byte in enumerate(encoded):
+        vector[(byte + offset * 131) % 2048] = 1
+    return vector
 
 
 __all__ = [

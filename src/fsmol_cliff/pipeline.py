@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from .assets import build_assay_assets
-from .chem import murcko_scaffold_smiles, require_rdkit
+from .chem import murcko_scaffold_smiles
 from .constants import DEFAULT_PROTOCOL_CONSTANTS
 from .io import write_json, write_jsonl, write_parquet
 
@@ -30,7 +30,6 @@ def build_assay_asset_bundle_for_profile(
     delta: float | None = None,
     hard_negative_pool_size: int | None = None,
 ) -> dict[str, Any]:
-    require_rdkit()
     records = load_task_records(task_file)
     assay_id = _assay_id_for_records(task_file, records)
     bundle = build_assay_assets(
