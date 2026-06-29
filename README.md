@@ -47,6 +47,21 @@ Release entry points:
 - [Benchmark Decision Note](./outputs/fsmol_cliff_release_v4/benchmark_decision_note.md)
 - [Release Reproducibility](./outputs/fsmol_cliff_release_v4/release_reproducibility.md)
 
+## Method Track
+
+The benchmark protocol and the post-benchmark method exploration are tracked separately:
+
+- [Benchmark Protocol Spec](./spec.md)
+- [Benchmark Completion Status](./spec_f.md)
+- [Method Restart Spec](./spec_cliffbench_method_restart_v1.md)
+- [Experiment Summary](./EXPERIMENT_SUMMARY_2026-03-24.md)
+
+Current default reading:
+
+- `spec.md` remains the frozen benchmark protocol
+- `spec_cliffbench_method_restart_v1.md` defines the restarted independent method track
+- `EXPERIMENT_SUMMARY_2026-03-24.md` records which exploratory families were tried and why they passed or failed
+
 ## Installation
 
 Python `3.12+` is required.
