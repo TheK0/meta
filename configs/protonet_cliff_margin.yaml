@@ -1,0 +1,14 @@
+method: protonet_cliff_margin
+base_checkpoint: checkpoints/PN-Support64_best_validation.pt
+profile: relaxed_covext_10_10
+result_tier: intermediate
+
+loss:
+  margin_gamma: 0.1
+  lambda_cliff: 0.3
+  control_preservation: true
+
+search:
+  margin_gamma: [0.05, 0.1, 0.2]
+  lambda_cliff: [0.1, 0.3, 1.0]
+  control_preservation: [false, true]

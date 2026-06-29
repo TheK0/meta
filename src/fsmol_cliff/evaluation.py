@@ -15,10 +15,12 @@ def evaluate_episode_manifest(
     *,
     episode: dict,
     assay_context: dict,
-    score_fn: Callable[[dict], dict[str, float]],
+    score_fn: Callable[[dict], dict],
 ) -> dict:
     labels = assay_context["labels"]
-    scores = score_fn(episode)
+    score_payload = score_fn(episode)
+    score_bundle = _normalize_score_payload(score_payload)
+    scores = score_bundle["calibrated_scores"]
     predictions = {molecule_id: 1 if score >= 0.5 else 0 for molecule_id, score in scores.items()}
     support_ids = [*episode["support_pos_ids"], *episode["support_neg_ids"]]
     query_ids = [*episode["query_pos_ids"], *episode["query_neg_ids"]]
@@ -82,6 +84,7 @@ def evaluate_episode_manifest(
         "metrics": metrics,
         "pair_counts": pair_counts,
         "episode_context": episode_context,
+        "score_bundle": score_bundle,
     }
 
 
@@ -218,4 +221,38 @@ def _summarize_episode_context(episode_contexts: Iterable[Mapping[str, float | i
         "fraction_positive_support": fraction_positive_support_summary["mean"],
         "num_query_molecules": num_query_summary["mean"],
         "fraction_positive_query": fraction_positive_query_summary["mean"],
+    }
+
+
+def _normalize_score_payload(score_payload: Mapping[str, object]) -> dict[str, dict[str, float]]:
+    if "calibrated_scores" in score_payload:
+        return {
+            "raw_scores": {
+                molecule_id: float(score)
+                for molecule_id, score in dict(score_payload["raw_scores"]).items()
+            },
+            "calibrated_scores": {
+                molecule_id: float(score)
+                for molecule_id, score in dict(score_payload["calibrated_scores"]).items()
+            },
+            "raw_margins": {
+                molecule_id: float(score)
+                for molecule_id, score in dict(score_payload["raw_margins"]).items()
+            },
+            "calibrated_margins": {
+                molecule_id: float(score)
+                for molecule_id, score in dict(score_payload["calibrated_margins"]).items()
+            },
+        }
+
+    calibrated_scores = {molecule_id: float(score) for molecule_id, score in score_payload.items()}
+    calibrated_margins = {
+        molecule_id: float(score) - 0.5
+        for molecule_id, score in calibrated_scores.items()
+    }
+    return {
+        "raw_scores": dict(calibrated_scores),
+        "calibrated_scores": calibrated_scores,
+        "raw_margins": dict(calibrated_margins),
+        "calibrated_margins": calibrated_margins,
     }
